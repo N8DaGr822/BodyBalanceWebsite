@@ -324,41 +324,9 @@ button {
     border-radius: var(--radius-card);
     overflow: hidden;
     aspect-ratio: 4 / 5;
-    background:
-        radial-gradient(ellipse at 72% 30%, rgba(255, 214, 153, 0.55), transparent 55%),
-        linear-gradient(135deg, #30405a 0%, #1b2c45 48%, #0e1b2d 100%);
-}
-
-.hero-art::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background-image:
-        repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.05) 0 2px, transparent 2px 60px),
-        repeating-linear-gradient(25deg, rgba(255, 255, 255, 0.04) 0 2px, transparent 2px 70px);
-    mix-blend-mode: overlay;
-}
-
-.hero-art::after {
-    content: "";
-    position: absolute;
-    left: 14%;
-    bottom: 12%;
-    width: 30%;
-    aspect-ratio: 1 / 1;
-    border-radius: 50%;
-    background: radial-gradient(circle at 35% 30%, #ffdfa0, #d98b3a 55%, #7c4a1f 100%);
-    box-shadow: 0 0 60px 18px rgba(255, 190, 110, 0.35);
-}
-
-.hero-art-caption {
-    position: absolute;
-    right: 1rem;
-    bottom: 1rem;
-    font-size: 0.65rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: rgba(246, 241, 228, 0.55);
+    background-image: url("../images/hero-candle-olive.jpg");
+    background-size: cover;
+    background-position: center;
 }
 
 /* ---------- Benefits row ---------- */
@@ -434,17 +402,9 @@ button {
 .about-preview-media {
     position: relative;
     min-height: 420px;
-    background:
-        radial-gradient(ellipse at 30% 25%, rgba(255, 210, 140, 0.65), transparent 45%),
-        linear-gradient(155deg, #284157 0%, #16293e 55%, #0b1a2a 100%);
-}
-
-.about-preview-media::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background-image: repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 14px);
-    opacity: 0.5;
+    background-image: url("../images/candle-crystal.jpg");
+    background-size: cover;
+    background-position: center;
 }
 
 .about-preview-copy {
@@ -602,7 +562,11 @@ button {
 /* ---------- Generic content sections (About / Services / FAQs / Contact / Blog) ---------- */
 
 .page-hero {
-    background: var(--navy);
+    background:
+        linear-gradient(155deg, rgba(14, 30, 50, 0.88) 0%, rgba(19, 39, 63, 0.82) 55%, rgba(14, 30, 50, 0.9) 100%),
+        url("../images/sunset-stones.jpg");
+    background-size: cover;
+    background-position: center;
     color: var(--text-on-navy);
     padding: 4.5rem 0 3.5rem 0;
     text-align: center;
