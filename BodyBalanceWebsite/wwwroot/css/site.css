@@ -485,6 +485,61 @@ button {
     color: var(--text-dark);
 }
 
+/* ---------- Practitioners ---------- */
+
+.practitioners {
+    background: var(--cream-pale);
+    padding: 5.5rem 0;
+}
+
+.practitioners-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2.5rem;
+    align-items: start;
+}
+
+.practitioner-card {
+    background: var(--cream);
+    border: 1px solid rgba(19, 39, 63, 0.1);
+    border-radius: var(--radius-card);
+    padding: 2.4rem;
+}
+
+.practitioner-photo {
+    width: 84px;
+    height: 84px;
+    border-radius: 50%;
+    margin-bottom: 1.3rem;
+    background:
+        radial-gradient(circle at 35% 30%, rgba(255, 214, 153, 0.9), transparent 60%),
+        linear-gradient(135deg, #30405a 0%, #1b2c45 55%, #0e1b2d 100%);
+}
+
+.practitioner-name {
+    font-size: 1.3rem;
+    margin-bottom: 0.25rem;
+}
+
+.practitioner-title {
+    display: block;
+    font-size: 0.76rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 1.3rem;
+}
+
+.practitioner-bio p {
+    font-size: 0.92rem;
+    color: var(--text-muted);
+}
+
+.practitioner-placeholder-note {
+    font-style: italic;
+}
+
 /* ---------- What to expect ---------- */
 
 .journey {
@@ -858,6 +913,10 @@ button {
     .journey-steps {
         grid-template-columns: repeat(2, 1fr);
         gap: 2.5rem;
+    }
+
+    .practitioners-grid {
+        grid-template-columns: 1fr;
     }
 
     .benefit + .benefit::before,
