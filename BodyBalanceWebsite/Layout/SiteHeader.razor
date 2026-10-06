@@ -1,0 +1,50 @@
+﻿<header class="site-header">
+    <div class="container">
+        <a class="brand" href="">
+            <svg class="brand-mark" viewBox="0 0 64 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M32 52C14 50 2 40 2 30c12 2 24 10 30 22Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" />
+                <path d="M32 52C50 50 62 40 62 30c-12 2-24 10-30 22Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" />
+                <path d="M32 52C18 46 8 32 10 18c12 4 20 18 22 34Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" />
+                <path d="M32 52C46 46 56 32 54 18c-12 4-20 18-22 34Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" />
+                <path d="M32 52C24 40 24 18 32 6c8 12 8 34 0 46Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" />
+            </svg>
+            <span class="brand-text">
+                <span class="brand-line1">Return to Self</span>
+                <span class="brand-line2">Reiki</span>
+            </span>
+        </a>
+
+        <nav class="main-nav @(navOpen ? "open" : "")">
+            <NavLink href="" Match="NavLinkMatch.All" @onclick="Close">Home</NavLink>
+            <NavLink href="about" @onclick="Close">About Me</NavLink>
+            <NavLink href="services" @onclick="Close">Services</NavLink>
+            <NavLink href="faqs" @onclick="Close">FAQs</NavLink>
+            <NavLink href="blog" @onclick="Close">Blog</NavLink>
+            <NavLink href="contact" @onclick="Close">Contact</NavLink>
+        </nav>
+
+        <div class="header-cta">
+            <button class="nav-toggle" title="Toggle navigation" @onclick="Toggle">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    @if (navOpen)
+                    {
+                        <path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                    }
+                    else
+                    {
+                        <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                    }
+                </svg>
+            </button>
+            <a class="btn btn-cream" href="contact">Schedule Now</a>
+        </div>
+    </div>
+</header>
+
+@code {
+    private bool navOpen;
+
+    private void Toggle() => navOpen = !navOpen;
+
+    private void Close() => navOpen = false;
+}

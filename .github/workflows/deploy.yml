@@ -1,0 +1,58 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish
+        run: dotnet publish BodyBalanceWebsite/BodyBalanceWebsite.csproj -c Release -o publish-output
+
+      - name: Rewrite base href for GitHub Pages
+        shell: pwsh
+        run: |
+          $indexPath = "publish-output/wwwroot/index.html"
+          (Get-Content $indexPath) -replace '<base href="/" />', '<base href="/${{ github.event.repository.name }}/" />' | Set-Content $indexPath
+
+      - name: Add .nojekyll and SPA fallback
+        shell: pwsh
+        run: |
+          New-Item -ItemType File -Path "publish-output/wwwroot/.nojekyll" -Force | Out-Null
+          Copy-Item "publish-output/wwwroot/index.html" "publish-output/wwwroot/404.html"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: publish-output/wwwroot
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
