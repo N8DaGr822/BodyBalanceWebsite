@@ -3,6 +3,7 @@ bin/
 obj/
 *.user
 *.suo
+local.settings.json
 
 ## Build / publish output
 publish/

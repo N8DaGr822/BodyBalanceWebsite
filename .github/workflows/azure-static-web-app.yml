@@ -1,0 +1,41 @@
+name: Deploy Azure Static Web App
+
+# Manual while Azure identity and SQL access are being configured.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-static-web-app
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test API
+        run: dotnet test BodyBalance.Api.Tests/BodyBalance.Api.Tests.csproj -c Release
+      - name: Publish website
+        run: dotnet publish BodyBalanceWebsite/BodyBalanceWebsite.csproj -c Release -o publish/site
+      - name: Configure same-origin API
+        shell: pwsh
+        run: |
+          '{ "ScheduleApiBaseUrl": "/api" }' | Set-Content publish/site/wwwroot/appsettings.json
+      - name: Publish API
+        run: dotnet publish BodyBalance.Api/BodyBalance.Api.csproj -c Release -o publish/api
+      - name: Deploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          app_location: publish/site/wwwroot
+          api_location: publish/api
+          output_location: ''
+          skip_app_build: true
+          skip_api_build: true

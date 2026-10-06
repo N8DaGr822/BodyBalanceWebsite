@@ -1,0 +1,195 @@
+@page "/schedule"
+@using BlazorCalendar
+@using BlazorCalendar.Models
+@using System.Globalization
+@using System.Text.Json
+@implements IDisposable
+@inject HttpClient Http
+@inject IConfiguration Configuration
+
+<PageTitle>Session Calendar | Return to Self Reiki</PageTitle>
+
+<section class="page-hero">
+    <div class="container">
+        <span class="eyebrow eyebrow--on-navy">Your Next Session</span>
+        <h1>Session Calendar</h1>
+        <p>A little time for yourself, with the practitioner you choose.</p>
+    </div>
+</section>
+
+<section class="content-section">
+    <div class="container">
+        <div class="session-calendar">
+            <div class="calendar-practitioner">
+                <label for="calendar-practitioner">Choose your practitioner</label>
+                <select id="calendar-practitioner" @bind="practitionerId" @bind:after="LoadAvailabilityAsync" disabled="@(practitioners.Length == 0)">
+                    @foreach (var person in practitioners)
+                    {
+                        <option value="@person.PractitionerId">@person.DisplayName</option>
+                    }
+                </select>
+            </div>
+
+            <div class="calendar-toolbar">
+                <h2 id="calendar-month" aria-live="polite">@month.ToString("MMMM yyyy")</h2>
+                <div class="calendar-navigation" role="group" aria-label="Calendar navigation">
+                    <button type="button" class="btn btn-navy" aria-label="Previous month" disabled="@(month.Year == 2000 && month.Month == 1)" @onclick="() => ChangeMonthAsync(-1)">Previous</button>
+                    <button type="button" class="btn btn-navy" @onclick="ShowCurrentMonth">Today</button>
+                    <button type="button" class="btn btn-navy" aria-label="Next month" disabled="@(month.Year == 2100 && month.Month == 12)" @onclick="() => ChangeMonthAsync(1)">Next</button>
+                </div>
+            </div>
+
+            <p class="calendar-notice" role="status">
+                @notice Online booking is not open yet. Times are shown in Central Time.
+            </p>
+            @if (loadFailed)
+            {
+                <button type="button" class="btn btn-navy" @onclick="LoadPractitionersAsync">Try Again</button>
+            }
+
+            <div class="calendar-grid" role="region" aria-labelledby="calendar-month" tabindex="0">
+                <CalendarContainer @key="(practitionerId, month, appointments)" FirstDate="month" DisplayedView="DisplayedView.Monthly" TasksList="appointments">
+                    <MonthlyView WeekDaysColor="var(--cream-pale)" SaturdayColor="var(--cream)" SundayColor="var(--cream)"
+                                 HeaderStyle="background:var(--navy);color:var(--text-on-navy)" />
+                </CalendarContainer>
+            </div>
+            @if (appointments.Length > 0)
+            {
+                <div class="calendar-windows">
+                    <h3>Available hours</h3>
+                    <p>These are open time windows, not bookable session slots.</p>
+                    <ul>
+                        @foreach (var window in appointments)
+                        {
+                            <li>@window.DateStart.ToString("MMM d, h:mm tt") &ndash; @window.DateEnd.ToString("MMM d, h:mm tt")</li>
+                        }
+                    </ul>
+                </div>
+            }
+        </div>
+    </div>
+</section>
+
+@code {
+    private Practitioner[] practitioners = [];
+    private int practitionerId;
+    private DateTime month;
+    private Tasks[] appointments = [];
+    private string notice = "Availability is coming soon. Empty dates do not indicate available appointments.";
+    private bool loadFailed;
+    private bool disposed;
+    private int requestVersion;
+    private CancellationTokenSource? requestCancellation;
+    private string? apiBaseUrl;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("America/Chicago"));
+        month = new(today.Year, today.Month, 1);
+        apiBaseUrl = Configuration["ScheduleApiBaseUrl"];
+        if (!string.IsNullOrWhiteSpace(apiBaseUrl))
+            await LoadPractitionersAsync();
+        else
+        {
+            practitioners = [new(1, "Mary"), new(2, "Leslie")];
+            practitionerId = 1;
+        }
+    }
+
+    private async Task LoadPractitionersAsync()
+    {
+        loadFailed = false;
+        notice = "Loading practitioners.";
+        var (version, token) = BeginRequest();
+        try
+        {
+            var result = await Http.GetFromJsonAsync<Practitioner[]>($"{apiBaseUrl!.TrimEnd('/')}/practitioners", token) ?? [];
+            if (disposed || version != requestVersion) return;
+            practitioners = result;
+            if (practitioners.Length == 0)
+            {
+                notice = "No practitioners are available yet.";
+                return;
+            }
+            if (!practitioners.Any(p => p.PractitionerId == practitionerId))
+                practitionerId = practitioners[0].PractitionerId;
+            await LoadAvailabilityAsync();
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed && version == requestVersion) SetLoadFailure();
+        }
+    }
+
+    private async Task LoadAvailabilityAsync()
+    {
+        if (string.IsNullOrWhiteSpace(apiBaseUrl) || practitionerId == 0) return;
+        var (version, token) = BeginRequest();
+        appointments = [];
+        loadFailed = false;
+        notice = "Loading available hours.";
+        try
+        {
+            var result = await Http.GetFromJsonAsync<AvailabilityResponse>(
+                $"{apiBaseUrl.TrimEnd('/')}/practitioners/{practitionerId}/availability?month={month.ToString("yyyy-MM", CultureInfo.InvariantCulture)}", token)
+                ?? throw new JsonException("Missing availability response.");
+            if (disposed || version != requestVersion) return;
+            var zone = TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
+            appointments = result.Windows.Select((window, index) => new Tasks
+            {
+                ID = index + 1,
+                DateStart = TimeZoneInfo.ConvertTimeFromUtc(window.StartAtUtc.UtcDateTime, zone),
+                DateEnd = TimeZoneInfo.ConvertTimeFromUtc(window.EndAtUtc.UtcDateTime, zone),
+                Caption = "Available hours", Code = "Open", Color = "#ece2cd", ForeColor = "#22304a",
+                NotBeDraggable = true
+            }).ToArray();
+            notice = appointments.Length == 0 ? "No available hours are published for this month." : "Available hours are shown below.";
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed && version == requestVersion) SetLoadFailure();
+        }
+    }
+
+    // State Sync: Cancel obsolete requests and prevent slower responses overwriting a newer selection.
+    private (int Version, CancellationToken Token) BeginRequest()
+    {
+        requestCancellation?.Cancel();
+        requestCancellation?.Dispose();
+        requestCancellation = new();
+        return (++requestVersion, requestCancellation.Token);
+    }
+
+    private void SetLoadFailure()
+    {
+        appointments = [];
+        loadFailed = true;
+        notice = "We couldn't load the schedule. Please try again shortly.";
+    }
+
+    private async Task ChangeMonthAsync(int offset)
+    {
+        month = month.AddMonths(offset);
+        await LoadAvailabilityAsync();
+    }
+
+    private async Task ShowCurrentMonth()
+    {
+        var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("America/Chicago"));
+        month = new(today.Year, today.Month, 1);
+        await LoadAvailabilityAsync();
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        requestCancellation?.Cancel();
+        requestCancellation?.Dispose();
+    }
+
+    private sealed record Practitioner(int PractitionerId, string DisplayName);
+    private sealed record TimeWindow(DateTimeOffset StartAtUtc, DateTimeOffset EndAtUtc);
+    private sealed record AvailabilityResponse(TimeWindow[] Windows);
+}

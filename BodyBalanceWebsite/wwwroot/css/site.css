@@ -860,6 +860,99 @@ button {
     color: var(--text-on-navy-muted);
 }
 
+/* ---------- Session calendar ---------- */
+
+.session-calendar {
+    max-width: 980px;
+    margin: 0 auto;
+}
+
+.calendar-practitioner label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.calendar-practitioner select {
+    min-width: 180px;
+    padding: 0.8rem 1rem;
+    font: inherit;
+    color: var(--text-dark);
+    background: var(--cream);
+    border: 1px solid var(--text-muted);
+    border-radius: var(--radius-card);
+}
+
+.calendar-toolbar,
+.calendar-navigation {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.calendar-toolbar {
+    justify-content: space-between;
+    margin: 2rem 0 1rem;
+}
+
+.calendar-toolbar h2 {
+    margin: 0;
+}
+
+.calendar-navigation .btn {
+    padding: 0.65rem 1rem;
+    min-height: 44px;
+}
+
+.calendar-navigation .btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+    transform: none;
+}
+
+.calendar-notice {
+    padding: 1rem;
+    background: var(--cream);
+    border-left: 3px solid var(--gold);
+    color: var(--text-dark);
+}
+
+.calendar-grid {
+    margin-top: 1rem;
+    overflow-x: auto;
+    border: 1px solid var(--cream-soft);
+    border-radius: var(--radius-card);
+}
+
+.session-calendar .monthly-calendar {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-rows: 3rem;
+    grid-auto-rows: clamp(3.5rem, 9vw, 6.5rem);
+}
+
+.session-calendar .header-name {
+    line-height: 3rem;
+}
+
+.session-calendar .monthly-today {
+    border-color: var(--gold);
+}
+
+.session-calendar :focus-visible {
+    outline: 2px solid var(--navy);
+    outline-offset: 3px;
+}
+
+.calendar-windows {
+    margin-top: 2rem;
+}
+
+.calendar-windows li {
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--cream-soft);
+}
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 980px) {
