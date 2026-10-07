@@ -1,15 +1,21 @@
-# Read-only calendar API
+# Calendar and booking request API
 
-The .NET 10 isolated Azure Functions project serves public schedule data. It never returns customer information, location addresses, or internal exception reasons. It has no booking or administrative write endpoints.
+The .NET 10 isolated Azure Functions project serves public schedule data and accepts appointment requests. Customer contact details and email history stay on the backend. Public responses include the practitioner's published location description, never internal exception reasons or lists of appointments. Administrative approval is performed using the private database review script, not a public write endpoint.
 
 | Endpoint | Result |
 | --- | --- |
-| `GET /api/practitioners` | Active practitioner IDs, names, and time-zone identifiers |
-| `GET /api/practitioners/1/availability?month=2026-10` | UTC open windows for the requested local calendar month; `bookingEnabled` is always false |
+| `GET /api/practitioners` | Active practitioners, time zones, location descriptions, minimum notice and slot intervals |
+| `GET /api/practitioners/1/services` | Active assigned services, descriptions, standard/promotional prices, and first-visit prices |
+| `GET /api/practitioners/1/availability?month=2026-10&serviceId=1` | UTC open windows and service-specific slots after the notice cutoff; `bookingEnabled` requires an active service and a configured location |
+| `POST /api/booking-requests` | Validates and saves a pending request, returning a receipt; does not reserve time or send email |
 
 An empty schedule returns an empty `windows` array. Configuration, identity, network, or SQL failures return HTTP 503, not an empty schedule. Invalid months return 400 and missing/inactive practitioners return 404. No schedule data is fabricated.
 
-Open windows are advisory: they combine weekly hours and added hours, then subtract blocked periods and confirmed/completed/no-show reservations. They are not service-specific bookable slots and do not yet incorporate a buffer policy. Past time is excluded. Concurrent writes can make a displayed window stale; confirmation must eventually revalidate atomically in a booking transaction. The current database has no working hours, so an empty schedule is expected.
+Open windows combine weekly and added hours, then subtract blocks and confirmed/completed/no-show reservations. Slots fit the selected service duration inside those windows and start on the practitioner's local clock grid. Notice is measured in elapsed UTC hours, including weekends and daylight-saving changes. Omitting `serviceId` preserves the open-window response and returns no slots. No buffer is configured. The version 2 migration publishes Mary's hours and services; other practitioners remain unchanged.
+
+Submission accepts `requestId` (a client-generated GUID reused for retries), `practitionerId`, `serviceId`, `startAtUtc` (an ISO timestamp with offset), `customerName`, `customerEmail`, optional `customerPhone`, and `isFirstVisit`. End time, price, currency, service name, and location are computed by the server. Responses use 201 for a saved/replayed receipt, 400 for invalid input, 409 for unavailable times or conflicting retry references, and 503 for infrastructure failures. The browser preserves the reference and details after an uncertain network result. A matching retry returns the original receipt even if the schedule later changes.
+
+First-visit pricing is provisional: it requires a customer claim and no non-cancelled history with that practitioner under the normalized email. Mary verifies eligibility and the final price at approval. No public email-history lookup is exposed, and receipts omit the history-derived price. Requests use a serializable transaction and a per-practitioner application lock; approvals use the same lock in `database/review_booking_request.sql`. Pending requests deliberately do not block each other. There is no automatic email, payment, or practitioner admin UI.
 
 ## Local development
 
@@ -45,7 +51,7 @@ In **Microsoft Entra ID > App registrations > New registration**:
 
 Record its **Application (client) ID** and **Directory (tenant) ID**. Under **Certificates & secrets**, create a client secret and keep its **Value** privately. Record its expiration and rotate it before that date. No Microsoft Graph application permissions or subscription Contributor role are needed by the API.
 
-As your existing Entra SQL administrator, run `database/configure_api_read_access.sql` in the `bodybalance` Query editor. It creates the database user and grants SELECT only on the columns needed for availability. It does not grant access to customer columns or write permissions. If Entra reports an ambiguous name or cannot resolve the application, stop and inspect that error rather than granting broad directory roles.
+As your existing Entra SQL administrator, apply `database/002_mary_booking_setup.sql`, rerun `database/configure_api_read_access.sql`, then run `database/configure_api_booking_access.sql` in the `bodybalance` Query editor. The latter grants the contact-field reads needed for history/retry checks and INSERT on appointments. It grants no UPDATE or DELETE; public callers cannot approve bookings. Keep these SQL permissions on the backend identity. If Entra reports an ambiguous name or cannot resolve the application, inspect that error rather than granting broad directory roles.
 
 ### 3. Configure backend settings
 
@@ -75,9 +81,10 @@ The existing GitHub Pages workflow is unchanged; that site retains the unconnect
 Verify on the Azure hostname:
 
 1. `/api/practitioners` returns Mary and Leslie.
-2. `/api/practitioners/1/availability?month=2026-10` returns `bookingEnabled: false` and empty windows until hours are configured.
-3. `/schedule` loads practitioner choices and shows the no-published-hours message, rather than an API error.
+2. Mary's services endpoint returns the 30- and 60-minute services. Use the returned IDs when querying availability.
+3. `/schedule` shows Mary's Tuesday-Saturday hours, service choices and request form. Dates within 48 hours have no requestable slots. Leslie remains unconfigured.
 4. Switch practitioner/month rapidly and navigate away while loading. No obsolete calendar data should replace the latest selection.
+5. In a non-production SQL environment, test a request and a retry with the same GUID (one row), simultaneous first-visit requests (only one provisional discount), rejection of a confirmed overlap, and concurrent approvals (only one confirmation). Review the receipt's pending language and confirm that no email or reservation is promised.
 
 SQL may need to wake from auto-pause; if the first call returns 503, retry shortly. If repeated calls fail, inspect configuration, SQL grants, and firewall settings. HTTP 503 deliberately hides internal details from public clients. Keep paid telemetry disabled unless explicitly selected.
 

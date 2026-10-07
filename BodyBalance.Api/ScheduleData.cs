@@ -5,7 +5,7 @@ using Microsoft.Extensions.Configuration;
 
 namespace BodyBalance.Api;
 
-public sealed class ScheduleData(IConfiguration configuration, TokenCredential credential)
+public sealed partial class ScheduleData(IConfiguration configuration, TokenCredential credential)
 {
     // SQL Authentication: Reuse the callback so token refresh does not create a new connection pool per token.
     private readonly Func<SqlAuthenticationParameters, CancellationToken, Task<SqlAuthenticationToken>> tokenCallback = async (_, token) =>
@@ -35,24 +35,37 @@ public sealed class ScheduleData(IConfiguration configuration, TokenCredential c
     public async Task<List<Practitioner>> GetPractitionersAsync(CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(cancellationToken);
+        return await GetPractitionersAsync(connection, null, cancellationToken);
+    }
+
+    private static async Task<List<Practitioner>> GetPractitionersAsync(SqlConnection connection,
+        SqlTransaction? transaction, CancellationToken cancellationToken)
+    {
         using var command = new SqlCommand("""
-            SELECT PractitionerId, DisplayName, TimeZoneId
+            SELECT PractitionerId, DisplayName, TimeZoneId, MinimumNoticeHours, SlotIntervalMinutes, Location
             FROM dbo.Practitioners WHERE IsActive = 1 ORDER BY PractitionerId;
-            """, connection);
+            """, connection, transaction);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var result = new List<Practitioner>();
         while (await reader.ReadAsync(cancellationToken))
-            result.Add(new(reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
+            result.Add(new(reader.GetInt32(0), reader.GetString(1), reader.GetString(2),
+                reader.GetInt32(3), reader.GetInt16(4), reader.IsDBNull(5) ? null : reader.GetString(5)));
         return result;
     }
 
     public async Task<List<TimeWindow>> GetAvailabilityAsync(Practitioner practitioner, DateTime month,
         CancellationToken cancellationToken)
     {
+        await using var connection = await OpenAsync(cancellationToken);
+        return await GetAvailabilityAsync(practitioner, month, connection, null, DateTime.UtcNow, cancellationToken);
+    }
+
+    private static async Task<List<TimeWindow>> GetAvailabilityAsync(Practitioner practitioner, DateTime month,
+        SqlConnection connection, SqlTransaction? transaction, DateTime nowUtc, CancellationToken cancellationToken)
+    {
         var zone = TimeZoneInfo.FindSystemTimeZoneById(practitioner.TimeZoneId);
         var start = Availability.ToUtc(month, zone);
         var end = Availability.ToUtc(month.AddMonths(1), zone);
-        await using var connection = await OpenAsync(cancellationToken);
         using var command = new SqlCommand("""
             SELECT DayOfWeek, StartTimeLocal, EndTimeLocal, EffectiveFrom, EffectiveThrough
             FROM dbo.AvailabilityRules
@@ -65,7 +78,7 @@ public sealed class ScheduleData(IConfiguration configuration, TokenCredential c
             SELECT StartAtUtc, EndAtUtc FROM dbo.Appointments
             WHERE PractitionerId = @id AND StartAtUtc < @end AND EndAtUtc > @start
                 AND Status IN ('Confirmed', 'Completed', 'NoShow');
-            """, connection);
+            """, connection, transaction);
         command.Parameters.Add("@id", SqlDbType.Int).Value = practitioner.PractitionerId;
         command.Parameters.Add("@monthStart", SqlDbType.Date).Value = month;
         command.Parameters.Add("@monthEnd", SqlDbType.Date).Value = month.AddMonths(1);
@@ -89,7 +102,35 @@ public sealed class ScheduleData(IConfiguration configuration, TokenCredential c
         while (await reader.ReadAsync(cancellationToken))
             blocked.Add(ReadWindow(reader));
 
-        return Availability.Calculate(month, zone, rules, added, blocked, DateTime.UtcNow);
+        return Availability.Calculate(month, zone, rules, added, blocked, nowUtc, practitioner.MinimumNoticeHours);
+    }
+
+    public async Task<List<Service>> GetServicesAsync(int practitionerId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        return await GetServicesAsync(practitionerId, connection, null, cancellationToken);
+    }
+
+    private static async Task<List<Service>> GetServicesAsync(int practitionerId, SqlConnection connection,
+        SqlTransaction? transaction, CancellationToken cancellationToken)
+    {
+        using var command = new SqlCommand("""
+            SELECT s.ServiceId, s.Name, s.DurationMinutes, s.Price, s.CurrencyCode,
+                s.Description, s.RegularPrice, s.FirstTimeClientPrice
+            FROM dbo.Services s
+            JOIN dbo.PractitionerServices ps ON ps.ServiceId = s.ServiceId
+            JOIN dbo.Practitioners p ON p.PractitionerId = ps.PractitionerId
+            WHERE ps.PractitionerId = @id AND p.IsActive = 1 AND ps.IsActive = 1 AND s.IsActive = 1
+            ORDER BY s.DurationMinutes, s.ServiceId;
+            """, connection, transaction);
+        command.Parameters.Add("@id", SqlDbType.Int).Value = practitionerId;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var result = new List<Service>();
+        while (await reader.ReadAsync(cancellationToken))
+            result.Add(new(reader.GetInt32(0), reader.GetString(1), reader.GetInt16(2),
+                reader.GetDecimal(3), reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5),
+                reader.IsDBNull(6) ? null : reader.GetDecimal(6), reader.IsDBNull(7) ? null : reader.GetDecimal(7)));
+        return result;
     }
 
     private static TimeWindow ReadWindow(SqlDataReader reader) => new(

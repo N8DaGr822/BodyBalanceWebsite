@@ -1,6 +1,6 @@
 -- Run manually as your Microsoft Entra database administrator AFTER registering
 -- a single-tenant Entra application with the unique display name bodybalance-api.
--- This grants the application's service principal read access, not your personal login.
+-- Apply schema version 2 first. This grants the API identity access, not your personal login.
 SET XACT_ABORT ON;
 IF DB_NAME() <> N'bodybalance'
     THROW 50000, 'Run this script against bodybalance.', 1;
@@ -11,7 +11,11 @@ BEGIN TRY
         CREATE USER [bodybalance-api] FROM EXTERNAL PROVIDER;
 
     GRANT SELECT ON OBJECT::dbo.Practitioners
-        (PractitionerId, DisplayName, TimeZoneId, IsActive) TO [bodybalance-api];
+        (PractitionerId, DisplayName, TimeZoneId, IsActive, MinimumNoticeHours, SlotIntervalMinutes, Location) TO [bodybalance-api];
+    GRANT SELECT ON OBJECT::dbo.Services
+        (ServiceId, Name, DurationMinutes, Price, CurrencyCode, Description, RegularPrice, FirstTimeClientPrice, IsActive) TO [bodybalance-api];
+    GRANT SELECT ON OBJECT::dbo.PractitionerServices
+        (PractitionerId, ServiceId, IsActive) TO [bodybalance-api];
     GRANT SELECT ON OBJECT::dbo.AvailabilityRules
         (PractitionerId, DayOfWeek, StartTimeLocal, EndTimeLocal, EffectiveFrom, EffectiveThrough) TO [bodybalance-api];
     GRANT SELECT ON OBJECT::dbo.AvailabilityExceptions

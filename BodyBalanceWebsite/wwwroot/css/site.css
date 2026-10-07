@@ -873,6 +873,22 @@ button {
     font-weight: 500;
 }
 
+.calendar-practitioner + .calendar-practitioner,
+.booking-form,
+.booking-first-visit {
+    margin-top: 1.5rem;
+}
+
+.booking-form fieldset {
+    border: 0;
+    padding: 0;
+    margin: 0 0 1.5rem;
+}
+
+.booking-first-visit {
+    display: block;
+}
+
 .calendar-practitioner select {
     min-width: 180px;
     padding: 0.8rem 1rem;

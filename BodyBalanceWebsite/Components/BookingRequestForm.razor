@@ -1,0 +1,145 @@
+@using System.ComponentModel.DataAnnotations
+@using System.Text.Json
+@implements IDisposable
+@inject HttpClient Http
+
+@if (receipt is not null)
+{
+    <div class="calendar-notice" role="status">
+        <h3>@(receipt.Status == "Requested" ? "Request received" : $"Appointment {receipt.Status.ToLowerInvariant()}")</h3>
+        @if (receipt.Status == "Requested")
+        {
+            <p>Your @receipt.ServiceName request is awaiting your practitioner's approval. Your time is not reserved yet.</p>
+        }
+        else
+        {
+            <p>Your @receipt.ServiceName request has already been reviewed. Contact your practitioner for details.</p>
+        }
+        <p>@TimeZoneInfo.ConvertTime(receipt.StartAtUtc, TimeZoneInfo.FindSystemTimeZoneById(receipt.TimeZoneId == "Central Standard Time" ? "America/Chicago" : receipt.TimeZoneId)).ToString("dddd, MMMM d, yyyy 'at' h:mm tt") (Central Time)</p>
+        <p>@receipt.Location. Your practitioner will confirm the exact address and final price.</p>
+        <p>Save your request reference: <strong>@receipt.RequestId</strong></p>
+        <p>No payment has been collected. No automatic email is sent.</p>
+    </div>
+}
+else
+{
+    <EditForm Model="model" OnValidSubmit="SubmitAsync" class="booking-form">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+        <fieldset disabled="@(submitting || retryPending)">
+            <legend>Your contact details</legend>
+            <div class="contact-form">
+                <div>
+                    <label for="booking-name">Name</label>
+                    <InputText id="booking-name" @bind-Value="model.CustomerName" maxlength="150" autocomplete="name" />
+                </div>
+                <div>
+                    <label for="booking-email">Email</label>
+                    <InputText id="booking-email" type="email" @bind-Value="model.CustomerEmail" maxlength="254" autocomplete="email" />
+                </div>
+                <div>
+                    <label for="booking-phone">Phone (optional)</label>
+                    <InputText id="booking-phone" type="tel" @bind-Value="model.CustomerPhone" maxlength="30" autocomplete="tel" />
+                </div>
+            </div>
+            @if (OffersFirstVisitPrice)
+            {
+                <label class="booking-first-visit">
+                    <InputCheckbox @bind-Value="model.IsFirstVisit" />
+                    I am a first-time client with this practitioner. I understand eligibility and the final price will be confirmed before my appointment.
+                </label>
+            }
+        </fieldset>
+        @if (!string.IsNullOrEmpty(error))
+        {
+            <p class="calendar-notice" role="alert">@error</p>
+        }
+        <button type="submit" class="btn btn-navy" disabled="@submitting">@(submitting ? "Sending request..." : retryPending ? "Retry this request" : "Request appointment")</button>
+    </EditForm>
+}
+
+@code {
+    [Parameter, EditorRequired] public string ApiBaseUrl { get; set; } = "";
+    [Parameter] public int PractitionerId { get; set; }
+    [Parameter] public int ServiceId { get; set; }
+    [Parameter] public DateTimeOffset StartAtUtc { get; set; }
+    [Parameter] public bool OffersFirstVisitPrice { get; set; }
+    [Parameter] public EventCallback<bool> BusyChanged { get; set; }
+
+    private readonly ContactDetails model = new();
+    private readonly CancellationTokenSource cancellation = new();
+    private Guid requestId = Guid.NewGuid();
+    private bool submitting;
+    private bool retryPending;
+    private bool disposed;
+    private string? error;
+    private BookingReceipt? receipt;
+
+    private async Task SubmitAsync()
+    {
+        if (submitting || receipt is not null) return;
+        submitting = true;
+        error = null;
+        await BusyChanged.InvokeAsync(true);
+        try
+        {
+            using var response = await Http.PostAsJsonAsync($"{ApiBaseUrl.TrimEnd('/')}/booking-requests", new
+            {
+                requestId, PractitionerId, ServiceId, StartAtUtc,
+                model.CustomerName, model.CustomerEmail, model.CustomerPhone, model.IsFirstVisit
+            }, cancellation.Token);
+            if (disposed) return;
+            if (response.IsSuccessStatusCode)
+            {
+                receipt = await response.Content.ReadFromJsonAsync<BookingReceipt>(cancellation.Token)
+                    ?? throw new JsonException("Missing request receipt.");
+                retryPending = false;
+            }
+            else if (response.StatusCode is System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.Conflict)
+            {
+                error = (await response.Content.ReadFromJsonAsync<ApiError>(cancellation.Token))?.Error
+                    ?? "Please check your details and choose an available time.";
+                retryPending = false;
+                requestId = Guid.NewGuid();
+            }
+            else
+            {
+                retryPending = true;
+                error = "We couldn't confirm whether your request was received. Retry this request before choosing another time.";
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed)
+            {
+                // Retry Safety: Preserve the original details and reference when the server outcome is unknown.
+                retryPending = true;
+                error = "We couldn't confirm whether your request was received. Retry this request before choosing another time.";
+            }
+        }
+        finally
+        {
+            submitting = false;
+            if (!disposed) await BusyChanged.InvokeAsync(retryPending);
+        }
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        cancellation.Cancel();
+        cancellation.Dispose();
+    }
+
+    private sealed class ContactDetails
+    {
+        [Required, StringLength(150), Display(Name = "Name")] public string CustomerName { get; set; } = "";
+        [Required, EmailAddress, StringLength(254), Display(Name = "Email")] public string CustomerEmail { get; set; } = "";
+        [StringLength(30), Display(Name = "Phone")] public string? CustomerPhone { get; set; }
+        public bool IsFirstVisit { get; set; }
+    }
+    private sealed record BookingReceipt(Guid RequestId, string Status, DateTimeOffset StartAtUtc,
+        DateTimeOffset EndAtUtc, string ServiceName, string TimeZoneId, string Location);
+    private sealed record ApiError(string Error);
+}

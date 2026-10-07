@@ -19,6 +19,42 @@ SELECT name FROM sys.tables WHERE schema_id = SCHEMA_ID('dbo') ORDER BY name;
 
 Expect version 1, two practitioners, and seven tables including `SchemaVersions`.
 
+## Mary's services and booking requests (version 2)
+
+Run `002_mary_booking_setup.sql` after version 1, then rerun `configure_api_read_access.sql` and run `configure_api_booking_access.sql` as the Entra database administrator. Deploy the updated API only after these scripts succeed. The migration is transactional and a successful rerun is a no-op. It stops for review if Mary already has active services or current/future weekly hours, rather than changing existing configuration silently.
+
+- Mary works Tuesday through Saturday, 10:00-18:00 Central, effective on the local date the migration runs. No inter-session buffer is configured.
+- `MinimumNoticeHours = 48` and `SlotIntervalMinutes = 30` are practitioner settings. Other practitioners retain zero minimum notice and their existing hours/services.
+- 30-Minute Reiki: `Price = 44`, `RegularPrice = 55`, no first-visit restriction.
+- 60-Minute Reiki: `Price = 111`, `FirstTimeClientPrice = 77`. `Price` remains the standard amount; the separate first-visit amount avoids applying the discount to returning clients.
+- Both descriptions are stored in `Services`, and both services are assigned only to Mary.
+- Mary's location is `Leavenworth - exact address to be confirmed` unless a location was already configured. Confirm the actual address before approving a request.
+- `BookingRequestId` is a unique retry reference. `IsFirstVisitRequested` records the customer's claim for Mary's review. Existing appointments keep their snapshots and remain untouched.
+
+The API validates notice, service assignment, complete session duration, clock alignment, blocks and reservations inside a serializable transaction using `BodyBalance.Practitioner.{PractitionerId}` as its application lock. It saves `Requested` appointments, not reservations. Separate people may request the same time; only one overlapping request can subsequently be confirmed.
+
+First-visit eligibility means new to the selected practitioner. A self-declaration plus normalized email history determines the provisional stored price. Prior requested, confirmed, completed or no-show appointments with Mary prevent the automatic discount; cancelled appointments do not. This cannot identify offline visits, different email addresses, or prove identity. Mary must verify eligibility and agree the final price during review. The public response does not reveal email history or the history-derived price. No payment is collected.
+
+### Review requests with Mary
+
+There is no practitioner admin screen or automatic email notification in this change. An administrator must check pending requests and coordinate approval with Mary. Run this private query in Azure SQL Query editor; never expose its result publicly:
+
+```sql
+SELECT a.BookingRequestId, p.DisplayName, a.ServiceName, a.StartAtUtc, a.EndAtUtc,
+    a.TimeZoneId, a.CustomerName, a.CustomerEmail, a.CustomerPhone,
+    a.Price AS ProvisionalPrice, a.IsFirstVisitRequested, a.Location, a.CreatedAtUtc
+FROM dbo.Appointments a
+JOIN dbo.Practitioners p ON p.PractitionerId = a.PractitionerId
+WHERE a.Status = 'Requested'
+ORDER BY a.CreatedAtUtc;
+```
+
+After review, use `review_booking_request.sql` with the request reference and `Confirmed` or `Cancelled`. Confirmation requires the agreed price and exact location. It takes the same practitioner lock, rejects past or occupied times, and rechecks active assignments, notice at submission, session duration, slot alignment, working hours and exceptions. Its conservative hours check requires one complete working interval to cover the session; it rejects sessions spanning multiple adjacent intervals until an administrator reviews the schedule. Approval may occur inside the notice period if the original request met it. The public API has INSERT but no UPDATE/DELETE permission and cannot approve requests.
+
+Do not confirm requests with a bare `UPDATE Status` statement. All future approval, rescheduling, cancellation and schedule-management tools must follow the same transaction/locking strategy. No review script sends messages; the administrator must communicate the outcome and final address to the client.
+
+Verify version 2, five Mary availability rules, and the two service assignments before enabling public requests. Database-backed concurrent request/retry/approval tests should run against a non-production SQL database; unit tests alone cannot prove SQL locking behavior.
+
 ## Scheduling rules
 
 - Each practitioner has separate availability. There is no shared-room constraint.
@@ -31,12 +67,12 @@ Expect version 1, two practitioners, and seven tables including `SchemaVersions`
 - Requested appointments do not reserve time. Confirmed appointments reserve the practitioner's interval; completed/no-show appointments retain occupied history. Cancelled appointments do not block availability. General enquiries without a requested slot are outside this initial schema.
 - Deactivate practitioners, services, and assignments rather than deleting booking history. Foreign keys intentionally do not cascade deletes.
 
-## Required before enabling bookings
+## Database responsibilities
 
-This script creates storage only. It does not connect the website, publish slots, authenticate practitioners, send email, or prevent overlapping appointments by itself.
+The initial schema creates storage only. Version 2 and the updated API support appointment requests; authentication for a practitioner UI and automatic email are not included.
 
 The C# API must validate service assignments, working hours, blocked times, contact details, and state transitions. All appointment creation, confirmation, rescheduling, and schedule changes must use a consistent per-practitioner transaction/locking strategy. Check overlaps and write in the same transaction; a separate check followed by an insert is unsafe. `RowVersion` supports stale-edit detection but does not prevent overlapping inserts. Test concurrent bookings before enabling public writes.
 
 Public endpoints return available slots, never customer records or internal exception reasons. Keep SQL credentials/tokens on the backend and give its identity only the required database permissions. The browser must not connect directly to SQL.
 
-Confirm actual service offerings, locations, weekly hours, and any buffer policy before seeding additional data. The website's existing service descriptions/prices have not been treated as confirmed booking configuration.
+Mary's version 2 offerings and hours are confirmed by the owner. Confirm other practitioners' offerings, locations, hours and buffer policies before seeding additional data.

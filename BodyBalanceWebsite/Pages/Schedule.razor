@@ -22,7 +22,7 @@
         <div class="session-calendar">
             <div class="calendar-practitioner">
                 <label for="calendar-practitioner">Choose your practitioner</label>
-                <select id="calendar-practitioner" @bind="practitionerId" @bind:after="LoadAvailabilityAsync" disabled="@(practitioners.Length == 0)">
+                <select id="calendar-practitioner" @bind="practitionerId" @bind:after="LoadServicesAsync" disabled="@(bookingBusy || practitioners.Length == 0)">
                     @foreach (var person in practitioners)
                     {
                         <option value="@person.PractitionerId">@person.DisplayName</option>
@@ -30,17 +30,38 @@
                 </select>
             </div>
 
+            @if (services.Length > 0)
+            {
+                <div class="calendar-practitioner">
+                    <label for="calendar-service">Choose your session</label>
+                    <select id="calendar-service" @bind="serviceId" @bind:after="LoadAvailabilityAsync" disabled="@bookingBusy">
+                        @foreach (var service in services)
+                        {
+                            <option value="@service.ServiceId">@service.Name &mdash; @service.Price.ToString("C", CultureInfo.GetCultureInfo("en-US"))</option>
+                        }
+                    </select>
+                </div>
+                @if (services.FirstOrDefault(s => s.ServiceId == serviceId) is { } selectedService)
+                {
+                    <p>@selectedService.Description</p>
+                    @if (selectedService.FirstTimeClientPrice is { } introductoryPrice)
+                    {
+                        <p>First-time clients with this practitioner: @introductoryPrice.ToString("C", CultureInfo.GetCultureInfo("en-US")). Eligibility and final price are confirmed by your practitioner.</p>
+                    }
+                }
+            }
+
             <div class="calendar-toolbar">
                 <h2 id="calendar-month" aria-live="polite">@month.ToString("MMMM yyyy")</h2>
                 <div class="calendar-navigation" role="group" aria-label="Calendar navigation">
-                    <button type="button" class="btn btn-navy" aria-label="Previous month" disabled="@(month.Year == 2000 && month.Month == 1)" @onclick="() => ChangeMonthAsync(-1)">Previous</button>
-                    <button type="button" class="btn btn-navy" @onclick="ShowCurrentMonth">Today</button>
-                    <button type="button" class="btn btn-navy" aria-label="Next month" disabled="@(month.Year == 2100 && month.Month == 12)" @onclick="() => ChangeMonthAsync(1)">Next</button>
+                    <button type="button" class="btn btn-navy" aria-label="Previous month" disabled="@(bookingBusy || month.Year == 2000 && month.Month == 1)" @onclick="() => ChangeMonthAsync(-1)">Previous</button>
+                    <button type="button" class="btn btn-navy" disabled="@bookingBusy" @onclick="ShowCurrentMonth">Today</button>
+                    <button type="button" class="btn btn-navy" aria-label="Next month" disabled="@(bookingBusy || month.Year == 2100 && month.Month == 12)" @onclick="() => ChangeMonthAsync(1)">Next</button>
                 </div>
             </div>
 
             <p class="calendar-notice" role="status">
-                @notice Online booking is not open yet. Times are shown in Central Time.
+                @notice Times are shown in Central Time. Requests require practitioner approval and do not reserve a time.
             </p>
             @if (loadFailed)
             {
@@ -53,6 +74,40 @@
                                  HeaderStyle="background:var(--navy);color:var(--text-on-navy)" />
                 </CalendarContainer>
             </div>
+            @if (bookingEnabled && slots.Length > 0)
+            {
+                <div class="calendar-windows calendar-practitioner">
+                    <h3>Request a session</h3>
+                    <p>@location. Please request at least @minimumNoticeHours hours in advance.</p>
+                    <label for="calendar-date">Choose a date</label>
+                    <select id="calendar-date" @bind="selectedDate" @bind:after="ClearSelectedTime" disabled="@bookingBusy">
+                        <option value="">Select a date</option>
+                        @foreach (var date in slots.Select(s => LocalTime(s.StartAtUtc).Date).Distinct())
+                        {
+                            <option value="@date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)">@date.ToString("dddd, MMMM d")</option>
+                        }
+                    </select>
+                    @if (!string.IsNullOrEmpty(selectedDate))
+                    {
+                        <label for="calendar-time">Choose a time</label>
+                        <select id="calendar-time" @bind="selectedStart" disabled="@bookingBusy">
+                            <option value="">Select a time</option>
+                            @foreach (var slot in slots.Where(s => LocalTime(s.StartAtUtc).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) == selectedDate))
+                            {
+                                <option value="@slot.StartAtUtc.ToString("O")">@LocalTime(slot.StartAtUtc).ToString("h:mm tt") &ndash; @LocalTime(slot.EndAtUtc).ToString("h:mm tt")</option>
+                            }
+                        </select>
+                    }
+                    @if (slots.FirstOrDefault(s => s.StartAtUtc.ToString("O") == selectedStart) is { } selectedSlot)
+                    {
+                        <BodyBalanceWebsite.Components.BookingRequestForm @key="(practitionerId, serviceId, selectedStart)"
+                            ApiBaseUrl="@(apiBaseUrl!)" PractitionerId="practitionerId" ServiceId="serviceId"
+                            StartAtUtc="selectedSlot.StartAtUtc"
+                            BusyChanged="@(value => bookingBusy = value)"
+                            OffersFirstVisitPrice="@(services.First(s => s.ServiceId == serviceId).FirstTimeClientPrice is not null)" />
+                    }
+                </div>
+            }
             @if (appointments.Length > 0)
             {
                 <div class="calendar-windows">
@@ -73,6 +128,16 @@
 @code {
     private Practitioner[] practitioners = [];
     private int practitionerId;
+    private Service[] services = [];
+    private int serviceId;
+    private TimeWindow[] slots = [];
+    private string selectedDate = "";
+    private string selectedStart = "";
+    private bool bookingEnabled;
+    private bool bookingBusy;
+    private string? location;
+    private int minimumNoticeHours;
+    private TimeZoneInfo timeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
     private DateTime month;
     private Tasks[] appointments = [];
     private string notice = "Availability is coming soon. Empty dates do not indicate available appointments.";
@@ -113,6 +178,32 @@
             }
             if (!practitioners.Any(p => p.PractitionerId == practitionerId))
                 practitionerId = practitioners[0].PractitionerId;
+            await LoadServicesAsync();
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed && version == requestVersion) SetLoadFailure();
+        }
+    }
+
+    private async Task LoadServicesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(apiBaseUrl) || practitionerId == 0) return;
+        var (version, token) = BeginRequest();
+        services = [];
+        serviceId = 0;
+        appointments = [];
+        slots = [];
+        selectedDate = selectedStart = "";
+        bookingEnabled = false;
+        notice = "Loading sessions.";
+        try
+        {
+            var result = await Http.GetFromJsonAsync<Service[]>($"{apiBaseUrl.TrimEnd('/')}/practitioners/{practitionerId}/services", token) ?? [];
+            if (disposed || version != requestVersion) return;
+            services = result;
+            serviceId = services.FirstOrDefault()?.ServiceId ?? 0;
             await LoadAvailabilityAsync();
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -127,15 +218,23 @@
         if (string.IsNullOrWhiteSpace(apiBaseUrl) || practitionerId == 0) return;
         var (version, token) = BeginRequest();
         appointments = [];
+        slots = [];
+        selectedDate = selectedStart = "";
+        bookingEnabled = false;
         loadFailed = false;
         notice = "Loading available hours.";
         try
         {
             var result = await Http.GetFromJsonAsync<AvailabilityResponse>(
-                $"{apiBaseUrl.TrimEnd('/')}/practitioners/{practitionerId}/availability?month={month.ToString("yyyy-MM", CultureInfo.InvariantCulture)}", token)
+                $"{apiBaseUrl.TrimEnd('/')}/practitioners/{practitionerId}/availability?month={month.ToString("yyyy-MM", CultureInfo.InvariantCulture)}{(serviceId > 0 ? $"&serviceId={serviceId}" : "")}", token)
                 ?? throw new JsonException("Missing availability response.");
             if (disposed || version != requestVersion) return;
-            var zone = TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(result.TimeZoneId == "Central Standard Time" ? "America/Chicago" : result.TimeZoneId);
+            timeZone = zone;
+            slots = result.Slots;
+            bookingEnabled = result.BookingEnabled;
+            location = result.Location;
+            minimumNoticeHours = result.MinimumNoticeHours;
             appointments = result.Windows.Select((window, index) => new Tasks
             {
                 ID = index + 1,
@@ -145,6 +244,8 @@
                 NotBeDraggable = true
             }).ToArray();
             notice = appointments.Length == 0 ? "No available hours are published for this month." : "Available hours are shown below.";
+            if (serviceId > 0 && slots.Length == 0)
+                notice = "No session times are available for this service this month.";
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
@@ -165,6 +266,8 @@
     private void SetLoadFailure()
     {
         appointments = [];
+        slots = [];
+        bookingEnabled = false;
         loadFailed = true;
         notice = "We couldn't load the schedule. Please try again shortly.";
     }
@@ -191,5 +294,11 @@
 
     private sealed record Practitioner(int PractitionerId, string DisplayName);
     private sealed record TimeWindow(DateTimeOffset StartAtUtc, DateTimeOffset EndAtUtc);
-    private sealed record AvailabilityResponse(TimeWindow[] Windows);
+    private sealed record Service(int ServiceId, string Name, int DurationMinutes, decimal Price,
+        string CurrencyCode, string? Description, decimal? RegularPrice, decimal? FirstTimeClientPrice);
+    private sealed record AvailabilityResponse(TimeWindow[] Windows, TimeWindow[] Slots, string TimeZoneId,
+        bool BookingEnabled, string? Location, int MinimumNoticeHours);
+
+    private DateTime LocalTime(DateTimeOffset value) => TimeZoneInfo.ConvertTimeFromUtc(value.UtcDateTime, timeZone);
+    private void ClearSelectedTime() => selectedStart = "";
 }
