@@ -6,6 +6,7 @@
 @implements IDisposable
 @inject HttpClient Http
 @inject IConfiguration Configuration
+@inject NavigationManager Navigation
 
 <PageTitle>Session Calendar | Return to Self Reiki</PageTitle>
 
@@ -176,6 +177,13 @@
         var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("America/Chicago"));
         month = new(today.Year, today.Month, 1);
         apiBaseUrl = Configuration["ScheduleApiBaseUrl"];
+        var bookingSiteUrl = Configuration["BookingSiteUrl"];
+        if (string.IsNullOrWhiteSpace(apiBaseUrl) && !string.IsNullOrWhiteSpace(bookingSiteUrl))
+        {
+            // Booking Hosting: Send static-site links and bookmarks to the connected calendar without a back-button loop.
+            Navigation.NavigateTo($"{bookingSiteUrl.TrimEnd('/')}/schedule{new Uri(Navigation.Uri).Fragment}", forceLoad: true, replace: true);
+            return;
+        }
         if (!string.IsNullOrWhiteSpace(apiBaseUrl))
             await LoadPractitionersAsync();
         else

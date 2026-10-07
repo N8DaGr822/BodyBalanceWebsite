@@ -136,9 +136,9 @@ The low-cost Azure option is the SQL server setting **Allow Azure services and r
 
 ### 5. Publish and verify
 
-Commit and push the reviewed files when ready. Run **Deploy Azure Static Web App** manually from GitHub Actions. Its workflow builds/tests the API, publishes both projects, sets only the Azure site's public `ScheduleApiBaseUrl` to `/api`, then deploys with the token. It keeps `/api` paths out of the SPA fallback so failures cannot silently return HTML.
+Commit and push the reviewed files when ready. Run **Deploy Azure Static Web App** manually from GitHub Actions. Its workflow builds/tests the API, sets only the Azure site's public `ScheduleApiBaseUrl` to `/api` before publishing both projects, then deploys with the token. Setting the address before publishing also updates Blazor's precompressed configuration files. It keeps `/api` paths out of the SPA fallback so failures cannot silently return HTML.
 
-The existing GitHub Pages workflow is unchanged; that site retains the unconnected calendar while its `ScheduleApiBaseUrl` is empty. Use the new `azurestaticapps.net` URL for the connected site. A later decision can retire GitHub Pages or move a custom domain.
+Both sites remain available. The GitHub Pages workflow sets the public `BookingSiteUrl` to `https://brave-flower-0c681771e.1.azurestaticapps.net` and leaves `ScheduleApiBaseUrl` empty. Opening `/schedule` on GitHub Pages redirects to the Azure calendar, preserving the fragment (including `#request-session`) and replacing the history entry so Back returns to the referring page. Azure continues to use its same-origin `/api` and does not redirect. Local development is unchanged unless `BookingSiteUrl` is explicitly configured. Deploy and verify the Azure calendar before publishing the GitHub Pages redirect; changing the destination hostname requires updating the Pages workflow.
 
 Verify on the Azure hostname:
 
