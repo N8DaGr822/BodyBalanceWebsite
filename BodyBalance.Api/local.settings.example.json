@@ -14,7 +14,10 @@
     "TwilioApiKeySid": "",
     "TwilioApiKeySecret": "",
     "NotificationFromPhone": "",
-    "BookingRequestsPerPractitionerPerHour": "20"
+    "BookingRequestsPerPractitionerPerHour": "20",
+    "ContactRecipientEmail": "",
+    "ContactRecipientPhone": "",
+    "ContactMessagesPerHour": "20"
   },
   "Host": {
     "CORS": "http://localhost:5171",

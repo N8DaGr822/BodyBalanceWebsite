@@ -1,4 +1,4 @@
-name: Retry booking notifications
+name: Retry booking and contact notifications
 
 on:
   workflow_dispatch:

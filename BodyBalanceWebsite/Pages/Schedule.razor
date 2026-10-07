@@ -14,6 +14,7 @@
         <span class="eyebrow eyebrow--on-navy">Your Next Session</span>
         <h1>Session Calendar</h1>
         <p>A little time for yourself, with the practitioner you choose.</p>
+        <a class="btn btn-cream" href="schedule#request-session">Request an appointment</a>
     </div>
 </section>
 
@@ -71,43 +72,63 @@
             <div class="calendar-grid" role="region" aria-labelledby="calendar-month" tabindex="0">
                 <CalendarContainer @key="(practitionerId, month, appointments)" FirstDate="month" DisplayedView="DisplayedView.Monthly" TasksList="appointments">
                     <MonthlyView WeekDaysColor="var(--cream-pale)" SaturdayColor="var(--cream)" SundayColor="var(--cream)"
-                                 HeaderStyle="background:var(--navy);color:var(--text-on-navy)" />
+                                 HeaderStyle="background:var(--navy);color:var(--text-on-navy)"
+                                 DayClick="@(e => SelectCalendarDateAsync(e.Day))" TaskClick="@(e => SelectCalendarDateAsync(e.Day))"
+                                 OutsideCurrentMonthClick="ChangeMonthAsync" />
                 </CalendarContainer>
             </div>
-            @if (bookingEnabled && slots.Length > 0)
-            {
-                <div class="calendar-windows calendar-practitioner">
-                    <h3>Request a session</h3>
+            <div id="request-session" class="calendar-windows calendar-practitioner">
+                <h2 @ref="requestHeading" tabindex="-1">Request an appointment</h2>
+                @if (string.IsNullOrWhiteSpace(apiBaseUrl))
+                {
+                    <p class="calendar-notice" role="status">Online appointment requests are not available on this site yet. Dates and times will appear here when booking is connected.</p>
+                }
+                else if (loading || loadFailed)
+                {
+                    <p class="calendar-notice" role="status">@notice</p>
+                }
+                else if (!bookingEnabled)
+                {
+                    <p class="calendar-notice" role="status">This practitioner is not accepting online appointment requests yet.</p>
+                }
+                else if (slots.Length == 0)
+                {
+                    <p class="calendar-notice" role="status">No appointment times are available for this session this month. Try another month or session.</p>
+                }
+                else
+                {
                     <p>@location. Please request at least @minimumNoticeHours hours in advance.</p>
-                    <label for="calendar-date">Choose a date</label>
-                    <select id="calendar-date" @bind="selectedDate" @bind:after="ClearSelectedTime" disabled="@bookingBusy">
-                        <option value="">Select a date</option>
-                        @foreach (var date in slots.Select(s => LocalTime(s.StartAtUtc).Date).Distinct())
-                        {
-                            <option value="@date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)">@date.ToString("dddd, MMMM d")</option>
-                        }
-                    </select>
-                    @if (!string.IsNullOrEmpty(selectedDate))
+                    <p>Click an available day on the calendar or choose a date below, then select a time to enter your contact details.</p>
+                }
+                @if (!string.IsNullOrEmpty(calendarSelectionNotice))
+                {
+                    <p class="calendar-notice" role="status">@calendarSelectionNotice</p>
+                }
+                <label for="calendar-date">Choose a date</label>
+                <select id="calendar-date" @bind="selectedDate" @bind:after="ClearSelectedTime" disabled="@(bookingBusy || !bookingEnabled || slots.Length == 0)">
+                    <option value="">Select a date</option>
+                    @foreach (var date in slots.Select(s => LocalTime(s.StartAtUtc).Date).Distinct())
                     {
-                        <label for="calendar-time">Choose a time</label>
-                        <select id="calendar-time" @bind="selectedStart" disabled="@bookingBusy">
-                            <option value="">Select a time</option>
-                            @foreach (var slot in slots.Where(s => LocalTime(s.StartAtUtc).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) == selectedDate))
-                            {
-                                <option value="@slot.StartAtUtc.ToString("O")">@LocalTime(slot.StartAtUtc).ToString("h:mm tt") &ndash; @LocalTime(slot.EndAtUtc).ToString("h:mm tt")</option>
-                            }
-                        </select>
+                        <option value="@date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)">@date.ToString("dddd, MMMM d")</option>
                     }
-                    @if (slots.FirstOrDefault(s => s.StartAtUtc.ToString("O") == selectedStart) is { } selectedSlot)
+                </select>
+                <label for="calendar-time">Choose a time</label>
+                <select id="calendar-time" @bind="selectedStart" disabled="@(bookingBusy || string.IsNullOrEmpty(selectedDate))">
+                    <option value="">Select a time</option>
+                    @foreach (var slot in slots.Where(s => LocalTime(s.StartAtUtc).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) == selectedDate))
                     {
-                        <BodyBalanceWebsite.Components.BookingRequestForm @key="(practitionerId, serviceId, selectedStart)"
-                            ApiBaseUrl="@(apiBaseUrl!)" PractitionerId="practitionerId" ServiceId="serviceId"
-                            StartAtUtc="selectedSlot.StartAtUtc"
-                            BusyChanged="@(value => bookingBusy = value)"
-                            OffersFirstVisitPrice="@(services.First(s => s.ServiceId == serviceId).FirstTimeClientPrice is not null)" />
+                        <option value="@slot.StartAtUtc.ToString("O")">@LocalTime(slot.StartAtUtc).ToString("h:mm tt") &ndash; @LocalTime(slot.EndAtUtc).ToString("h:mm tt")</option>
                     }
-                </div>
-            }
+                </select>
+                @if (slots.FirstOrDefault(s => s.StartAtUtc.ToString("O") == selectedStart) is { } selectedSlot)
+                {
+                    <BodyBalanceWebsite.Components.BookingRequestForm @key="(practitionerId, serviceId, selectedStart)"
+                        ApiBaseUrl="@(apiBaseUrl!)" PractitionerId="practitionerId" ServiceId="serviceId"
+                        StartAtUtc="selectedSlot.StartAtUtc"
+                        BusyChanged="@(value => bookingBusy = value)"
+                        OffersFirstVisitPrice="@(services.First(s => s.ServiceId == serviceId).FirstTimeClientPrice is not null)" />
+                }
+            </div>
             @if (appointments.Length > 0)
             {
                 <div class="calendar-windows">
@@ -135,6 +156,9 @@
     private string selectedStart = "";
     private bool bookingEnabled;
     private bool bookingBusy;
+    private bool loading;
+    private ElementReference requestHeading;
+    private string? calendarSelectionNotice;
     private string? location;
     private int minimumNoticeHours;
     private TimeZoneInfo timeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
@@ -163,6 +187,7 @@
 
     private async Task LoadPractitionersAsync()
     {
+        loading = true;
         loadFailed = false;
         notice = "Loading practitioners.";
         var (version, token) = BeginRequest();
@@ -173,6 +198,7 @@
             practitioners = result;
             if (practitioners.Length == 0)
             {
+                loading = false;
                 notice = "No practitioners are available yet.";
                 return;
             }
@@ -191,6 +217,8 @@
     {
         if (string.IsNullOrWhiteSpace(apiBaseUrl) || practitionerId == 0) return;
         var (version, token) = BeginRequest();
+        loading = true;
+        calendarSelectionNotice = null;
         services = [];
         serviceId = 0;
         appointments = [];
@@ -217,6 +245,8 @@
     {
         if (string.IsNullOrWhiteSpace(apiBaseUrl) || practitionerId == 0) return;
         var (version, token) = BeginRequest();
+        loading = true;
+        calendarSelectionNotice = null;
         appointments = [];
         slots = [];
         selectedDate = selectedStart = "";
@@ -230,6 +260,7 @@
                 ?? throw new JsonException("Missing availability response.");
             if (disposed || version != requestVersion) return;
             var zone = TimeZoneInfo.FindSystemTimeZoneById(result.TimeZoneId == "Central Standard Time" ? "America/Chicago" : result.TimeZoneId);
+            loading = false;
             timeZone = zone;
             slots = result.Slots;
             bookingEnabled = result.BookingEnabled;
@@ -265,6 +296,7 @@
 
     private void SetLoadFailure()
     {
+        loading = false;
         appointments = [];
         slots = [];
         bookingEnabled = false;
@@ -274,6 +306,9 @@
 
     private async Task ChangeMonthAsync(int offset)
     {
+        // Calendar Navigation: Adjacent-month clicks respect the same bounds and booking lock as the buttons.
+        if (bookingBusy || month.Year == 2000 && month.Month == 1 && offset < 0
+            || month.Year == 2100 && month.Month == 12 && offset > 0) return;
         month = month.AddMonths(offset);
         await LoadAvailabilityAsync();
     }
@@ -300,5 +335,21 @@
         bool BookingEnabled, string? Location, int MinimumNoticeHours);
 
     private DateTime LocalTime(DateTimeOffset value) => TimeZoneInfo.ConvertTimeFromUtc(value.UtcDateTime, timeZone);
-    private void ClearSelectedTime() => selectedStart = "";
+    private void ClearSelectedTime()
+    {
+        selectedStart = "";
+        calendarSelectionNotice = null;
+    }
+
+    private async Task SelectCalendarDateAsync(DateTime day)
+    {
+        if (bookingBusy || disposed) return;
+        ClearSelectedTime();
+        selectedDate = bookingEnabled && slots.Any(s => LocalTime(s.StartAtUtc).Date == day.Date)
+            ? day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "";
+        if (bookingEnabled && string.IsNullOrEmpty(selectedDate))
+            calendarSelectionNotice = $"No appointment times are available on {day:MMMM d} for this session. Choose another date.";
+        // Focus: The heading is always rendered, so calendar clicks can reveal the controls without a render-timing hook.
+        await requestHeading.FocusAsync();
+    }
 }

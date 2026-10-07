@@ -1,12 +1,18 @@
 ﻿@page "/contact"
 
+@using System.ComponentModel.DataAnnotations
+@using System.Text.Json
+@implements IDisposable
+@inject HttpClient Http
+@inject IConfiguration Configuration
+
 <PageTitle>Contact | Return to Self Reiki</PageTitle>
 
 <section class="page-hero">
     <div class="container">
         <span class="eyebrow eyebrow--on-navy">Contact</span>
-        <h1>Schedule Your Session</h1>
-        <p>Reach out below and I'll get back to you within one to two business days.</p>
+        <h1>Contact Us</h1>
+        <p>Send a message to the practice. To request an appointment, visit the <a href="schedule">session calendar</a>.</p>
     </div>
 </section>
 
@@ -18,29 +24,49 @@
                 {
                     <div class="faq-item" style="border:none">
                         <h3>Thank you!</h3>
-                        <p>Your message has been received. I'll be in touch soon to find a time that works for you.</p>
+                        <p>Your message has been received. We'll reply using the contact details you provided.</p>
+                        <p>Your message reference: <strong>@requestId</strong></p>
                     </div>
                 }
                 else
                 {
-                    <div class="contact-form">
-                        <div>
-                            <label for="name">Name</label>
-                            <input id="name" type="text" @bind="name" placeholder="Your name" />
-                        </div>
-                        <div>
-                            <label for="email">Email</label>
-                            <input id="email" type="email" @bind="email" placeholder="you@email.com" />
-                        </div>
-                        <div>
-                            <label for="message">Message</label>
-                            <textarea id="message" @bind="message" placeholder="Share a bit about what you're looking for..."></textarea>
-                        </div>
-                        <button type="button" class="btn btn-navy" @onclick="Submit">
-                            Send Message
+                    @if (string.IsNullOrWhiteSpace(apiBaseUrl))
+                    {
+                        <p class="calendar-notice" role="status">Online messaging is not available on this site yet. The form cannot send messages until it is connected.</p>
+                    }
+                    <EditForm Model="model" OnValidSubmit="Submit" class="booking-form">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+                        <fieldset disabled="@(submitting || retryPending)">
+                            <legend>Send us a message</legend>
+                            <div class="contact-form">
+                                <div>
+                                    <label for="name">Name</label>
+                                    <InputText id="name" @bind-Value="model.Name" maxlength="150" autocomplete="name" placeholder="Your name" />
+                                </div>
+                                <div>
+                                    <label for="email">Email</label>
+                                    <InputText id="email" type="email" @bind-Value="model.Email" maxlength="254" autocomplete="email" placeholder="you@email.com" />
+                                </div>
+                                <div>
+                                    <label for="phone">Phone (optional)</label>
+                                    <InputText id="phone" type="tel" @bind-Value="model.Phone" maxlength="30" autocomplete="tel" />
+                                </div>
+                                <div>
+                                    <label for="message">Message</label>
+                                    <InputTextArea id="message" @bind-Value="model.Message" maxlength="4000" placeholder="How can we help?" />
+                                </div>
+                            </div>
+                        </fieldset>
+                        @if (!string.IsNullOrEmpty(error))
+                        {
+                            <p class="calendar-notice" role="alert">@error</p>
+                        }
+                        <button type="submit" class="btn btn-navy" disabled="@(submitting || string.IsNullOrWhiteSpace(apiBaseUrl))">
+                            @(submitting ? "Sending..." : retryPending ? "Retry this message" : "Send Message")
                             <svg viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
                         </button>
-                    </div>
+                    </EditForm>
                 }
             </div>
 
@@ -80,13 +106,67 @@
 </section>
 
 @code {
-    private string name = "";
-    private string email = "";
-    private string message = "";
+    private readonly ContactDetails model = new();
+    private readonly CancellationTokenSource cancellation = new();
+    private Guid requestId = Guid.NewGuid();
+    private string? apiBaseUrl;
+    private string? error;
     private bool submitted;
+    private bool submitting;
+    private bool retryPending;
+    private bool disposed;
 
-    private void Submit()
+    protected override void OnInitialized() => apiBaseUrl = Configuration["ScheduleApiBaseUrl"];
+
+    private async Task Submit()
     {
-        submitted = true;
+        if (submitting || submitted || string.IsNullOrWhiteSpace(apiBaseUrl)) return;
+        submitting = true;
+        error = null;
+        try
+        {
+            using var response = await Http.PostAsJsonAsync($"{apiBaseUrl.TrimEnd('/')}/contact-messages",
+                new { requestId, model.Name, model.Email, model.Phone, model.Message }, cancellation.Token);
+            if (disposed) return;
+            if (response.IsSuccessStatusCode)
+            {
+                var receipt = await response.Content.ReadFromJsonAsync<ContactReceipt>(cancellation.Token);
+                if (receipt?.RequestId != requestId) throw new JsonException("Missing message receipt.");
+                submitted = true;
+                retryPending = false;
+            }
+            else if (response.StatusCode is System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.Conflict or System.Net.HttpStatusCode.RequestEntityTooLarge)
+            {
+                error = (await response.Content.ReadFromJsonAsync<ApiError>(cancellation.Token))?.Error ?? "Please check your message and contact details.";
+                retryPending = false;
+                requestId = Guid.NewGuid();
+            }
+            else SetUnknown();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed) SetUnknown();
+        }
+        finally { submitting = false; }
     }
+
+    private void SetUnknown()
+    {
+        // Retry Safety: Keep the original message and reference after an uncertain server response.
+        retryPending = true;
+        error = "We couldn't confirm whether your message was received. Retry this message before sending another one.";
+    }
+
+    public void Dispose() { disposed = true; cancellation.Cancel(); cancellation.Dispose(); }
+
+    private sealed class ContactDetails
+    {
+        [Required, StringLength(150)] public string Name { get; set; } = "";
+        [Required, EmailAddress, StringLength(254)] public string Email { get; set; } = "";
+        [StringLength(30)] public string? Phone { get; set; }
+        [Required, StringLength(4000)] public string Message { get; set; } = "";
+    }
+    private sealed record ContactReceipt(Guid RequestId);
+    private sealed record ApiError(string Error);
 }

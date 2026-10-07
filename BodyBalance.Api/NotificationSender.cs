@@ -11,6 +11,8 @@ using Microsoft.Extensions.Configuration;
 namespace BodyBalance.Api;
 
 public sealed record NotificationResult(string State, string? ProviderId = null, string? Error = null);
+public sealed record NotificationMessage(string Channel, string? Recipient, string Subject,
+    string EmailText, string SmsText, string? ReplyTo = null);
 
 public sealed class NotificationSender(HttpClient http, IConfiguration configuration)
 {
@@ -27,6 +29,15 @@ public sealed class NotificationSender(HttpClient http, IConfiguration configura
             return new("NeedsReview", Error: "SigningKeyChanged");
         // Link Privacy: URL fragments stay out of HTTP request paths and referrer headers.
         var link = new Uri(site, $"review-request#{notification.RequestId:D}.{token}").AbsoluteUri;
+        return await SendAsync(new NotificationMessage(notification.Channel, notification.Recipient,
+            "Appointment request awaiting your approval",
+            $"A client requested an appointment with you. Review the details and approve or decline:\n{link}\n\nThis private link expires after 7 days or when the session starts. Keep it private. You can also sign in at {new Uri(site, "practitioner")} to review requests.",
+            $"Return to Self Reiki: New appointment request. Review privately: {link} Reply STOP to unsubscribe."), cancellationToken);
+    }
+
+    // Shared Delivery: Booking requests and contact messages use the same providers, test routing and failure policy.
+    public async Task<NotificationResult> SendAsync(NotificationMessage notification, CancellationToken cancellationToken)
+    {
         var testEmail = configuration["NotificationTestEmail"];
         var testPhone = configuration["NotificationTestPhone"];
         if (string.IsNullOrWhiteSpace(testEmail) != string.IsNullOrWhiteSpace(testPhone))
@@ -48,11 +59,12 @@ public sealed class NotificationSender(HttpClient http, IConfiguration configura
             {
                 personalizations = new[] { new { to = new[] { new { email = recipient } } } },
                 from = new { email = from, name = "Return to Self Reiki" },
-                subject = "Appointment request awaiting your approval",
-                content = new[] { new { type = "text/plain", value = $"A client requested an appointment with you. Review the details and approve or decline:\n{link}\n\nThis private link expires after 7 days or when the session starts. Keep it private. You can also sign in at {new Uri(site, "practitioner")} to review requests." } },
+                subject = notification.Subject,
+                reply_to = ValidEmail(notification.ReplyTo) ? new { email = notification.ReplyTo } : null,
+                content = new[] { new { type = "text/plain", value = notification.EmailText } },
                 // Tracking: Do not let a tracking redirect rewrite or retain the private approval link.
                 tracking_settings = new { click_tracking = new { enable = false, enable_text = false }, open_tracking = new { enable = false } }
-            });
+            }, options: new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
         }
         else if (notification.Channel == "Sms")
         {
@@ -67,7 +79,7 @@ public sealed class NotificationSender(HttpClient http, IConfiguration configura
             request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
             {
                 ["From"] = from!, ["To"] = recipient!,
-                ["Body"] = $"Return to Self Reiki: New appointment request. Review privately: {link} Reply STOP to unsubscribe."
+                ["Body"] = notification.SmsText
             });
         }
         else return new("NeedsReview", Error: "UnknownChannel");

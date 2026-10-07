@@ -83,7 +83,9 @@ public sealed partial class ScheduleFunctions(ScheduleData data, BookingNotifica
         }, cancellationToken);
 
     private async Task<HttpResponseData> ExecuteAsync(HttpRequestData request,
-        Func<Task<HttpResponseData>> action, CancellationToken cancellationToken)
+        Func<Task<HttpResponseData>> action, CancellationToken cancellationToken,
+        string unavailableMessage = "The schedule is temporarily unavailable. Please try again shortly.",
+        string invalidJsonMessage = "Enter valid booking details.")
     {
         try { return await action(); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -94,13 +96,13 @@ public sealed partial class ScheduleFunctions(ScheduleData data, BookingNotifica
         }
         catch (JsonException)
         {
-            return await JsonAsync(request, HttpStatusCode.BadRequest, new { error = "Enter valid booking details." });
+            return await JsonAsync(request, HttpStatusCode.BadRequest, new { error = invalidJsonMessage });
         }
         catch (Exception exception)
         {
-            logger.LogError(exception, "Schedule data could not be loaded.");
+            logger.LogError(exception, "The request could not be completed.");
             return await JsonAsync(request, HttpStatusCode.ServiceUnavailable,
-                new { error = "The schedule is temporarily unavailable. Please try again shortly." });
+                new { error = unavailableMessage });
         }
     }
 

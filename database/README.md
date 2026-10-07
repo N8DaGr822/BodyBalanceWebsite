@@ -80,6 +80,24 @@ To set production contacts, update only the intended practitioner's `Notificatio
 
 The version 3 migration and SQL concurrency scenarios require validation against a non-production Azure SQL database before enabling production writes. Unit tests validate token/identity boundaries and mocked provider behavior; they do not establish SQL locking or real delivery.
 
+## General contact messages (version 4)
+
+Run `004_contact_messages.sql` after version 3, then `configure_api_contact_access.sql` as the database administrator. The migration is transactional and repeat-safe. It adds `ContactMessages` (name, email, optional phone, message, creation time and unique request reference) and `ContactNotifications` (one email and one SMS delivery record per message). No existing appointments or practitioner settings change.
+
+The API saves the message and its two notification rows together. A matching GUID retry returns the saved receipt; reusing that GUID with different content fails. New submissions share an application lock for the duplicate check and the practice-wide hourly limit. Contact enquiries never reserve time, require approval, or appear in the appointment inbox. Shared practice recipients and test routing are backend settings documented in `../BodyBalance.Api/README.md`.
+
+Monitor privately, using the same provider-reconciliation rules as booking notifications:
+
+```sql
+SELECT RequestId, Channel, State, Attempts, LastError, ProviderMessageId,
+    ClaimedAtUtc, NextAttemptAtUtc
+FROM dbo.ContactNotifications
+WHERE State <> 'Accepted'
+ORDER BY NextAttemptAtUtc;
+```
+
+Contact message contents and customer details are private and have no public read endpoint. If delivery fails, an administrator can retrieve the saved message by its `RequestId` in SQL. Only reset the specific `(RequestId, Channel)` notification after proving it was not accepted by the provider. Validate the migration, concurrent GUID replay and hourly limits against a non-production SQL database before enabling writes.
+
 ## Scheduling rules
 
 - Each practitioner has separate availability. There is no shared-room constraint.
@@ -89,12 +107,12 @@ The version 3 migration and SQL concurrency scenarios require validation against
 - Intervals are start-inclusive and end-exclusive; an appointment ending at 11:00 can be followed by one starting at 11:00.
 - Added exceptions extend working hours; blocked exceptions take precedence. No availability is published until working hours or added exceptions exist.
 - Appointments reference valid practitioner/service assignments and snapshot the service name, price, currency, location, time zone, and start/end times.
-- Requested appointments do not reserve time. Confirmed appointments reserve the practitioner's interval; completed/no-show appointments retain occupied history. Cancelled appointments do not block availability. General enquiries without a requested slot are outside this initial schema.
+- Requested appointments do not reserve time. Confirmed appointments reserve the practitioner's interval; completed/no-show appointments retain occupied history. Cancelled appointments do not block availability. Version 4 stores general enquiries separately from appointments.
 - Deactivate practitioners, services, and assignments rather than deleting booking history. Foreign keys intentionally do not cascade deletes.
 
 ## Database responsibilities
 
-The initial schema creates storage only. Version 2 supports appointment requests. Version 3 supports private approval links, account-authorized practitioner review, and durable email/SMS notifications.
+The initial schema creates storage only. Version 2 supports appointment requests. Version 3 supports private approval links, account-authorized practitioner review, and durable email/SMS notifications. Version 4 supports general contact messages and their email/SMS notifications.
 
 The C# API must validate service assignments, working hours, blocked times, contact details, and state transitions. All appointment creation, confirmation, rescheduling, and schedule changes must use a consistent per-practitioner transaction/locking strategy. Check overlaps and write in the same transaction; a separate check followed by an insert is unsafe. `RowVersion` supports stale-edit detection but does not prevent overlapping inserts. Test concurrent bookings before enabling public writes.
 

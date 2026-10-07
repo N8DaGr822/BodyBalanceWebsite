@@ -78,7 +78,9 @@ public sealed partial class ScheduleFunctions
             if (string.IsNullOrEmpty(expected) || expected.Length < 32 || string.IsNullOrEmpty(supplied) || supplied.Length > 256
                 || !CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(expected)), SHA256.HashData(Encoding.UTF8.GetBytes(supplied))))
                 return await JsonAsync(request, HttpStatusCode.Unauthorized, new { error = "Not authorized." });
-            return await JsonAsync(request, HttpStatusCode.OK, new { processed = await notifications.DispatchAsync(null, cancellationToken) });
+            var processed = await notifications.DispatchAsync(null, cancellationToken);
+            var contactProcessed = await notifications.DispatchContactAsync(null, cancellationToken);
+            return await JsonAsync(request, HttpStatusCode.OK, new { processed, contactProcessed });
         }, cancellationToken);
 
     private async Task<int?> AuthorizedPractitionerAsync(HttpRequestData request, Guid id, CancellationToken cancellationToken)

@@ -103,6 +103,46 @@ public class NotificationSenderTests
         Assert.Equal("NeedsReview", result.State);
     }
 
+    [Fact]
+    public async Task ContactEmailUsesSharedDeliveryAndReplyToWithoutRequiringBookingLinkSettings()
+    {
+        var configuration = Config();
+        configuration["BookingSiteUrl"] = "";
+        configuration["BookingReviewSigningKey"] = "";
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            var root = json.RootElement;
+            Assert.Equal("practice@example.com", root.GetProperty("personalizations")[0].GetProperty("to")[0].GetProperty("email").GetString());
+            Assert.Equal("sender@example.com", root.GetProperty("from").GetProperty("email").GetString());
+            Assert.Equal("client@example.com", root.GetProperty("reply_to").GetProperty("email").GetString());
+            Assert.Equal("Contact subject", root.GetProperty("subject").GetString());
+            Assert.Equal("Contact text", root.GetProperty("content")[0].GetProperty("value").GetString());
+            return new(HttpStatusCode.Accepted);
+        }));
+        var notification = new NotificationMessage("Email", "practice@example.com", "Contact subject", "Contact text", "Contact alert", "client@example.com");
+        Assert.Equal("Accepted", (await new NotificationSender(http, configuration).SendAsync(notification, default)).State);
+    }
+
+    [Fact]
+    public async Task ContactSmsUsesTestOverrideAndTheContactAlert()
+    {
+        var configuration = Config();
+        configuration["NotificationTestEmail"] = "tester@example.com";
+        configuration["NotificationTestPhone"] = "+15551234567";
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            var body = await request.Content!.ReadAsStringAsync();
+            Assert.Contains("To=%2B15551234567", body);
+            Assert.DoesNotContain("15559999999", body);
+            Assert.Contains("Body=Contact+alert", body);
+            Assert.DoesNotContain("Private+message", body);
+            return new(HttpStatusCode.Created) { Content = new StringContent("{\"sid\":\"SMtest\",\"status\":\"queued\"}") };
+        }));
+        var notification = new NotificationMessage("Sms", "+15559999999", "Contact subject", "Private message", "Contact alert");
+        Assert.Equal("Accepted", (await new NotificationSender(http, configuration).SendAsync(notification, default)).State);
+    }
+
     private static BookingNotification Notification(string channel)
     {
         var requestId = Guid.NewGuid();
