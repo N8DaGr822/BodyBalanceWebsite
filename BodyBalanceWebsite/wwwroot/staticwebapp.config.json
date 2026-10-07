@@ -1,5 +1,10 @@
 {
   "platform": { "apiRuntime": "dotnet-isolated:10.0" },
+  "routes": [
+    { "route": "/api/practitioner/*", "allowedRoles": ["authenticated"] },
+    { "route": "/review-request", "headers": { "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex, nofollow" } },
+    { "route": "/practitioner*", "headers": { "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex, nofollow" } }
+  ],
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": ["/api/*", "/_framework/*", "/_content/*", "/css/*", "/images/*", "/*.json", "/*.css"]

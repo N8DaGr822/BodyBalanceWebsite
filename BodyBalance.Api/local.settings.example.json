@@ -2,7 +2,19 @@
   "IsEncrypted": false,
   "Values": {
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
-    "SqlConnectionString": "Server=tcp:body-balance.database.windows.net,1433;Database=bodybalance;Encrypt=True;TrustServerCertificate=False;Connection Timeout=20;"
+    "SqlConnectionString": "Server=tcp:body-balance.database.windows.net,1433;Database=bodybalance;Encrypt=True;TrustServerCertificate=False;Connection Timeout=20;",
+    "BookingSiteUrl": "",
+    "BookingReviewSigningKey": "",
+    "NotificationDispatchKey": "",
+    "NotificationTestEmail": "",
+    "NotificationTestPhone": "",
+    "NotificationFromEmail": "",
+    "SendGridApiKey": "",
+    "TwilioAccountSid": "",
+    "TwilioApiKeySid": "",
+    "TwilioApiKeySecret": "",
+    "NotificationFromPhone": "",
+    "BookingRequestsPerPractitionerPerHour": "20"
   },
   "Host": {
     "CORS": "http://localhost:5171",

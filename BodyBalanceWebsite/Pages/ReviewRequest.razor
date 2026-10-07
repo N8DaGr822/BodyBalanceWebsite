@@ -1,0 +1,35 @@
+@page "/review-request"
+@inject NavigationManager Navigation
+@inject IConfiguration Configuration
+
+<PageTitle>Review Appointment | Return to Self Reiki</PageTitle>
+<HeadContent><meta name="referrer" content="no-referrer" /><meta name="robots" content="noindex,nofollow" /></HeadContent>
+
+<section class="page-hero"><div class="container"><h1>Review Appointment Request</h1><p>Review the details before confirming a time.</p></div></section>
+<section class="content-section"><div class="container session-calendar">
+    @if (requestId != Guid.Empty && token is not null && !string.IsNullOrWhiteSpace(apiBaseUrl))
+    {
+        <BodyBalanceWebsite.Components.BookingReviewForm ApiBaseUrl="@apiBaseUrl" RequestId="requestId" Token="@token" />
+    }
+    else
+    {
+        <p class="calendar-notice">Open the full private link from your notification, or sign in to review your appointments.</p>
+        <a class="btn btn-navy" href="practitioner">Practitioner sign-in</a>
+    }
+</div></section>
+
+@code {
+    private Guid requestId;
+    private string? token;
+    private string? apiBaseUrl;
+
+    protected override void OnInitialized()
+    {
+        apiBaseUrl = Configuration["ScheduleApiBaseUrl"];
+        var fragment = new Uri(Navigation.Uri).Fragment.TrimStart('#').Split('.');
+        if (fragment.Length == 2 && Guid.TryParse(fragment[0], out requestId)
+            && fragment[1].Length == 64 && fragment[1].All(char.IsAsciiHexDigit)) token = fragment[1];
+        // Link Privacy: Keep the credential only in component memory after opening the notification.
+        if (new Uri(Navigation.Uri).Fragment.Length > 0) Navigation.NavigateTo("review-request", replace: true);
+    }
+}

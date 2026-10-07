@@ -1,0 +1,21 @@
+@page "/practitioner/requests/{RequestId:guid}"
+@inject IConfiguration Configuration
+
+<PageTitle>Review Appointment | Return to Self Reiki</PageTitle>
+<HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
+
+<section class="page-hero"><div class="container"><h1>Review Appointment</h1><p>Your appointment details and approval.</p></div></section>
+<section class="content-section"><div class="container session-calendar">
+    @if (!string.IsNullOrWhiteSpace(Configuration["ScheduleApiBaseUrl"]))
+    {
+        <BodyBalanceWebsite.Components.BookingReviewForm @key="RequestId" ApiBaseUrl="@(Configuration["ScheduleApiBaseUrl"]!)" RequestId="RequestId" />
+    }
+    else
+    {
+        <p>Practitioner access is not available on this site yet.</p>
+    }
+</div></section>
+
+@code {
+    [Parameter] public Guid RequestId { get; set; }
+}

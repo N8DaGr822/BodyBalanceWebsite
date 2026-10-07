@@ -1,0 +1,41 @@
+name: Retry booking notifications
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: booking-notifications
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: vars.BODYBALANCE_SITE_URL != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch queued notifications
+        env:
+          SITE_URL: ${{ vars.BODYBALANCE_SITE_URL }}
+          DISPATCH_KEY: ${{ secrets.BOOKING_NOTIFICATION_DISPATCH_KEY }}
+        shell: python {0}
+        run: |
+          import os, urllib.request, urllib.parse
+          site = os.environ['SITE_URL'].rstrip('/')
+          parsed = urllib.parse.urlparse(site)
+          if parsed.scheme != 'https' or not parsed.netloc or parsed.path or parsed.query or parsed.fragment or parsed.username:
+              raise RuntimeError('BODYBALANCE_SITE_URL must be the HTTPS site origin.')
+          key = os.environ['DISPATCH_KEY']
+          if len(key) < 32:
+              raise RuntimeError('Configure BOOKING_NOTIFICATION_DISPATCH_KEY.')
+          # Never forward the dispatch credential through redirects.
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          request = urllib.request.Request(site + '/api/booking-notifications/dispatch', data=b'{}',
+              headers={'X-Notification-Key': key, 'Content-Type': 'application/json'}, method='POST')
+          with urllib.request.build_opener(NoRedirect).open(request, timeout=40) as response:
+              print(response.read().decode())

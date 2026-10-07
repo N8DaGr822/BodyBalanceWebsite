@@ -3,11 +3,13 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace BodyBalance.Api;
 
-public sealed class ScheduleFunctions(ScheduleData data, ILogger<ScheduleFunctions> logger)
+public sealed partial class ScheduleFunctions(ScheduleData data, BookingNotifications notifications,
+    IConfiguration configuration, ILogger<ScheduleFunctions> logger)
 {
     [Function("Practitioners")]
     public Task<HttpResponseData> Practitioners(
@@ -38,7 +40,15 @@ public sealed class ScheduleFunctions(ScheduleData data, ILogger<ScheduleFunctio
                 return await JsonAsync(request, HttpStatusCode.RequestEntityTooLarge, new { error = "The booking request is too large." });
             var booking = JsonSerializer.Deserialize<BookingRequest>(buffer.AsSpan(0, count), new JsonSerializerOptions(JsonSerializerDefaults.Web))
                 ?? throw new BookingException("Enter your booking details.");
-            return await JsonAsync(request, HttpStatusCode.Created, await data.RequestBookingAsync(booking, cancellationToken));
+            var receipt = await data.RequestBookingAsync(booking, cancellationToken);
+            try { await notifications.DispatchAsync(receipt.RequestId, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                // Saved Request: Notification failures must not turn a committed booking into a client-visible failure.
+                logger.LogError(exception, "Notification dispatch failed for request {RequestId}; inspect the outbox.", receipt.RequestId);
+            }
+            return await JsonAsync(request, HttpStatusCode.Created, receipt);
         }, cancellationToken);
 
     [Function("Availability")]

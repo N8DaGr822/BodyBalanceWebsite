@@ -18,7 +18,7 @@
         <p>@TimeZoneInfo.ConvertTime(receipt.StartAtUtc, TimeZoneInfo.FindSystemTimeZoneById(receipt.TimeZoneId == "Central Standard Time" ? "America/Chicago" : receipt.TimeZoneId)).ToString("dddd, MMMM d, yyyy 'at' h:mm tt") (Central Time)</p>
         <p>@receipt.Location. Your practitioner will confirm the exact address and final price.</p>
         <p>Save your request reference: <strong>@receipt.RequestId</strong></p>
-        <p>No payment has been collected. No automatic email is sent.</p>
+        <p>No payment has been collected. Your practitioner will contact you after reviewing your request.</p>
     </div>
 }
 else

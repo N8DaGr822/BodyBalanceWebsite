@@ -76,12 +76,28 @@ public sealed partial class ScheduleData
             hasHistory = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1;
         }
 
+        // Notification Cost: Bound anonymous request alerts per practitioner; GUID replays return before this check.
+        var requestLimit = int.TryParse(configuration["BookingRequestsPerPractitionerPerHour"], out var configuredLimit)
+            && configuredLimit > 0 ? configuredLimit : 20;
+        using (var command = new SqlCommand("""
+            SELECT COUNT(*) FROM dbo.Appointments
+            WHERE PractitionerId = @id AND CreatedAtUtc >= DATEADD(hour, -1, SYSUTCDATETIME());
+            """, connection, transaction))
+        {
+            command.Parameters.Add("@id", SqlDbType.Int).Value = request.PractitionerId;
+            if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) >= requestLimit)
+                throw new BookingException("Online requests are temporarily at capacity. Please try again later.");
+        }
+        var reviewToken = BookingReview.CreateToken(request.RequestId, request.PractitionerId, configuration["BookingReviewSigningKey"]);
         using (var command = new SqlCommand("""
             INSERT dbo.Appointments (PractitionerId, ServiceId, CustomerName, CustomerEmail, CustomerPhone,
                 StartAtUtc, EndAtUtc, ServiceName, Price, CurrencyCode, Location, TimeZoneId,
-                Status, BookingRequestId, IsFirstVisitRequested, CreatedAtUtc)
+                Status, BookingRequestId, IsFirstVisitRequested, CreatedAtUtc, ReviewTokenHash, ReviewExpiresAtUtc)
             VALUES (@practitionerId, @serviceId, @name, @email, @phone, @start, @end, @serviceName,
-                @price, @currency, @location, @zone, 'Requested', @requestId, @firstVisit, @created);
+                @price, @currency, @location, @zone, 'Requested', @requestId, @firstVisit, @created, @tokenHash, @expires);
+            DECLARE @appointmentId bigint = SCOPE_IDENTITY();
+            INSERT dbo.BookingNotifications (AppointmentId, Channel)
+            VALUES (@appointmentId, 'Email'), (@appointmentId, 'Sms');
             """, connection, transaction))
         {
             command.Parameters.Add("@practitionerId", SqlDbType.Int).Value = request.PractitionerId;
@@ -101,6 +117,9 @@ public sealed partial class ScheduleData
             command.Parameters.Add("@zone", SqlDbType.NVarChar, 100).Value = practitioner.TimeZoneId;
             command.Parameters.Add("@requestId", SqlDbType.UniqueIdentifier).Value = request.RequestId;
             command.Parameters.Add("@firstVisit", SqlDbType.Bit).Value = request.IsFirstVisit;
+            command.Parameters.Add("@tokenHash", SqlDbType.Binary, 32).Value = BookingReview.TokenHash(reviewToken)!;
+            command.Parameters.Add("@expires", SqlDbType.DateTime2).Value = slot.StartAtUtc < nowUtc.AddDays(7)
+                ? slot.StartAtUtc : nowUtc.AddDays(7);
             // Notice Snapshot: Persist the validation instant without rounding forward in datetime2(0).
             command.Parameters.Add("@created", SqlDbType.DateTime2).Value = new DateTime(
                 nowUtc.Ticks - nowUtc.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc);

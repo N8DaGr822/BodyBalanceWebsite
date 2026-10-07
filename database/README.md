@@ -37,7 +37,7 @@ First-visit eligibility means new to the selected practitioner. A self-declarati
 
 ### Review requests with Mary
 
-There is no practitioner admin screen or automatic email notification in this change. An administrator must check pending requests and coordinate approval with Mary. Run this private query in Azure SQL Query editor; never expose its result publicly:
+Version 3 adds notification links and a practitioner sign-in screen. The administrator query and review script remain available as a fallback. Run this private query in Azure SQL Query editor; never expose its result publicly:
 
 ```sql
 SELECT a.BookingRequestId, p.DisplayName, a.ServiceName, a.StartAtUtc, a.EndAtUtc,
@@ -49,11 +49,36 @@ WHERE a.Status = 'Requested'
 ORDER BY a.CreatedAtUtc;
 ```
 
-After review, use `review_booking_request.sql` with the request reference and `Confirmed` or `Cancelled`. Confirmation requires the agreed price and exact location. It takes the same practitioner lock, rejects past or occupied times, and rechecks active assignments, notice at submission, session duration, slot alignment, working hours and exceptions. Its conservative hours check requires one complete working interval to cover the session; it rejects sessions spanning multiple adjacent intervals until an administrator reviews the schedule. Approval may occur inside the notice period if the original request met it. The public API has INSERT but no UPDATE/DELETE permission and cannot approve requests.
+For manual database review, use `review_booking_request.sql` with the request reference and `Confirmed` or `Cancelled`. Confirmation requires the agreed price and exact location. It takes the same practitioner lock, rejects past or occupied times, and rechecks active assignments, notice at submission, session duration, slot alignment, working hours and exceptions. Its conservative hours check requires one complete working interval to cover the session; it rejects sessions spanning multiple adjacent intervals until an administrator reviews the schedule. Approval may occur inside the notice period if the original request met it. Version 3 gives the backend limited UPDATE access for token/account-authorized approvals; anonymous schedule and submission endpoints cannot approve requests.
 
 Do not confirm requests with a bare `UPDATE Status` statement. All future approval, rescheduling, cancellation and schedule-management tools must follow the same transaction/locking strategy. No review script sends messages; the administrator must communicate the outcome and final address to the client.
 
 Verify version 2, five Mary availability rules, and the two service assignments before enabling public requests. Database-backed concurrent request/retry/approval tests should run against a non-production SQL database; unit tests alone cannot prove SQL locking behavior.
+
+## Notifications and practitioner review (version 3)
+
+Run `003_booking_notifications.sql`, then `configure_api_review_access.sql` as the database administrator before deploying the new API. This adds private recipient columns, hashed review credentials, link expiry, a review timestamp, and `BookingNotifications`. Existing appointments and practitioner routing remain unchanged; no contacts or messages are seeded.
+
+New appointment submissions and their two notification rows commit together. Only confirmed appointments reserve calendar availability. Both web approval paths use the existing practitioner lock and recheck availability within the same serializable transaction. Account-to-practitioner permissions and test recipient overrides belong in private backend settings; see `../BodyBalance.Api/README.md` for setup.
+
+Monitor privately:
+
+```sql
+SELECT n.AppointmentId, a.BookingRequestId, p.DisplayName, n.Channel, n.State,
+    n.Attempts, n.LastError, n.ProviderMessageId, n.ClaimedAtUtc, n.NextAttemptAtUtc,
+    a.Status AS AppointmentStatus, a.ReviewExpiresAtUtc
+FROM dbo.BookingNotifications n
+JOIN dbo.Appointments a ON a.AppointmentId = n.AppointmentId
+JOIN dbo.Practitioners p ON p.PractitionerId = a.PractitionerId
+WHERE n.State <> 'Accepted'
+ORDER BY n.NextAttemptAtUtc;
+```
+
+After inspecting provider logs and proving a notification was **not accepted**, an administrator can reset that exact `(AppointmentId, Channel)` row to `State = 'Pending', Attempts = 0, ClaimId = NULL, ClaimedAtUtc = NULL, LastError = NULL, NextAttemptAtUtc = SYSUTCDATETIME()`. Keep the operation scoped to the inspected row. Do not reset `Accepted`, uncertain outcomes, or recently claimed `Sending` rows without reconciliation; doing so can duplicate messages. Expired or already-reviewed requests are skipped by dispatch and remain available in the login inbox when pending.
+
+To set production contacts, update only the intended practitioner's `NotificationEmail` and E.164 `NotificationPhone` after verifying their ID/slug. Clear both test override settings when switching to production routing. These columns are not returned by public practitioner endpoints.
+
+The version 3 migration and SQL concurrency scenarios require validation against a non-production Azure SQL database before enabling production writes. Unit tests validate token/identity boundaries and mocked provider behavior; they do not establish SQL locking or real delivery.
 
 ## Scheduling rules
 
@@ -69,7 +94,7 @@ Verify version 2, five Mary availability rules, and the two service assignments 
 
 ## Database responsibilities
 
-The initial schema creates storage only. Version 2 and the updated API support appointment requests; authentication for a practitioner UI and automatic email are not included.
+The initial schema creates storage only. Version 2 supports appointment requests. Version 3 supports private approval links, account-authorized practitioner review, and durable email/SMS notifications.
 
 The C# API must validate service assignments, working hours, blocked times, contact details, and state transitions. All appointment creation, confirmation, rescheduling, and schedule changes must use a consistent per-practitioner transaction/locking strategy. Check overlaps and write in the same transaction; a separate check followed by an insert is unsafe. `RowVersion` supports stale-edit detection but does not prevent overlapping inserts. Test concurrent bookings before enabling public writes.
 

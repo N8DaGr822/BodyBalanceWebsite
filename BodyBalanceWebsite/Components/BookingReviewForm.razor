@@ -1,0 +1,192 @@
+@using System.ComponentModel.DataAnnotations
+@using System.Globalization
+@using System.Text.Json
+@implements IDisposable
+@inject HttpClient Http
+
+@if (loading)
+{
+    <p role="status">Loading appointment request...</p>
+}
+@if (!string.IsNullOrEmpty(error))
+{
+    <p class="calendar-notice" role="alert">@error</p>
+}
+@if (details is not null)
+{
+    <h2>@details.ServiceName with @details.PractitionerName</h2>
+    <dl class="booking-review-details">
+        <dt>Client</dt><dd>@details.CustomerName</dd>
+        <dt>Email</dt><dd>@details.CustomerEmail</dd>
+        <dt>Phone</dt><dd>@(details.CustomerPhone ?? "Not provided")</dd>
+        <dt>Requested time</dt><dd>@LocalTime(details.StartAtUtc).ToString("dddd, MMMM d, yyyy 'at' h:mm tt") &ndash; @LocalTime(details.EndAtUtc).ToString("h:mm tt") (@details.TimeZoneId)</dd>
+        <dt>First visit with you</dt><dd>@(details.IsFirstVisitRequested ? "Client requested first-visit pricing; please verify eligibility." : "Not requested")</dd>
+        <dt>Status</dt><dd>@(details.Status == "Cancelled" ? "Declined / cancelled" : details.Status)</dd>
+    </dl>
+    @if (details.Status == "Requested")
+    {
+        <EditForm Model="model" OnValidSubmit="ApproveAsync" class="booking-form">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <fieldset disabled="@(submitting || retryStatus is not null)">
+                <legend>Confirm the appointment details</legend>
+                <div class="contact-form">
+                    <div>
+                        <label for="review-price">Agreed price (@details.CurrencyCode)</label>
+                        <InputNumber id="review-price" @bind-Value="model.Price" min="0" max="99999999.99" step="0.01" />
+                    </div>
+                    <div>
+                        <label for="review-location">Confirmed address</label>
+                        <InputText id="review-location" @bind-Value="model.Location" maxlength="500" />
+                    </div>
+                </div>
+                <label class="booking-first-visit"><InputCheckbox @bind-Value="model.Verified" /> I verified the price, first-visit eligibility, and appointment address.</label>
+            </fieldset>
+            <div class="calendar-navigation">
+                @if (retryStatus is null)
+                {
+                    <button type="submit" class="btn btn-navy" disabled="@(submitting || !model.Verified)">@(submitting ? "Saving..." : "Approve and add to calendar")</button>
+                    <button type="button" class="btn btn-cream" disabled="@submitting" @onclick="() => DecideAsync(false)">Decline request</button>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-navy" disabled="@submitting" @onclick='() => DecideAsync(retryStatus == "Confirmed")'>Retry the same decision</button>
+                }
+            </div>
+        </EditForm>
+        <p>Approval reserves this time on the calendar. Contact the client to let them know your decision and the final details.</p>
+    }
+    else
+    {
+        <p class="calendar-notice" role="status">@(details.Status == "Confirmed" ? "Appointment confirmed and saved to the calendar." : "This request has been reviewed.") Contact the client with the outcome.</p>
+        <p>@details.Price.ToString("0.00", CultureInfo.InvariantCulture) @details.CurrencyCode &middot; @details.Location</p>
+    }
+}
+@if (!loading)
+{
+    <div class="calendar-navigation">
+        <button type="button" class="btn btn-cream" disabled="@submitting" @onclick="LoadAsync">Refresh status</button>
+        <a href="practitioner">Practitioner sign-in and appointments</a>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string ApiBaseUrl { get; set; } = "";
+    [Parameter] public Guid RequestId { get; set; }
+    [Parameter] public string? Token { get; set; }
+
+    private readonly CancellationTokenSource cancellation = new();
+    private readonly ReviewFields model = new();
+    private ReviewDetails? details;
+    private bool loading = true;
+    private bool submitting;
+    private bool disposed;
+    private string? error;
+    private string? retryStatus;
+    private string Endpoint => Token is null ? $"practitioner/requests/{RequestId:D}" : "booking-review";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        details = null;
+        try
+        {
+            using var response = await PostAsync("details", new { RequestId, Token });
+            if (!response.IsSuccessStatusCode)
+            {
+                error = response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                    ? "Please sign in to review this appointment."
+                    : response.StatusCode == System.Net.HttpStatusCode.NotFound
+                        ? "This link has expired or is unavailable to your account. Sign in to review your appointments."
+                        : "We couldn't load this request. Please try again.";
+                return;
+            }
+            var result = await response.Content.ReadFromJsonAsync<ReviewDetails>(cancellation.Token)
+                ?? throw new JsonException("Missing appointment details.");
+            if (disposed) return;
+            details = result;
+            model.Price = details.Price;
+            model.Location = details.Location;
+            model.Verified = false;
+            retryStatus = null;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed) error = "We couldn't load this request. Please try again.";
+        }
+        finally { loading = false; }
+    }
+
+    private Task ApproveAsync() => model.Verified ? DecideAsync(true) : Task.CompletedTask;
+
+    private async Task DecideAsync(bool approve)
+    {
+        if (submitting || details?.Status != "Requested") return;
+        submitting = true;
+        error = null;
+        var status = approve ? "Confirmed" : "Cancelled";
+        try
+        {
+            using var response = await PostAsync("decision", new { RequestId, Token, Status = status,
+                Price = approve ? model.Price : null, Location = approve ? model.Location : null });
+            if (disposed) return;
+            if (response.IsSuccessStatusCode)
+            {
+                details = await response.Content.ReadFromJsonAsync<ReviewDetails>(cancellation.Token)
+                    ?? throw new JsonException("Missing decision result.");
+                retryStatus = null;
+            }
+            else if (response.StatusCode is System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.Conflict or System.Net.HttpStatusCode.NotFound)
+            {
+                error = (await response.Content.ReadFromJsonAsync<ApiError>(cancellation.Token))?.Error ?? "This request could not be reviewed.";
+                retryStatus = null;
+            }
+            else if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            {
+                error = "Your session expired. Sign in again to review this appointment.";
+                retryStatus = null;
+            }
+            else SetUnknown(status);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed) SetUnknown(status);
+        }
+        finally { submitting = false; }
+    }
+
+    private async Task<HttpResponseMessage> PostAsync(string action, object body)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiBaseUrl.TrimEnd('/')}/{Endpoint}/{action}")
+        { Content = JsonContent.Create(body) };
+        request.Headers.Add("X-Booking-Review", "1");
+        return await Http.SendAsync(request, cancellation.Token);
+    }
+
+    private void SetUnknown(string status)
+    {
+        retryStatus = status;
+        error = "We couldn't confirm whether your decision was saved. Retry the same decision or refresh its status.";
+    }
+
+    private DateTime LocalTime(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value,
+        TimeZoneInfo.FindSystemTimeZoneById(details!.TimeZoneId == "Central Standard Time" ? "America/Chicago" : details.TimeZoneId)).DateTime;
+
+    public void Dispose() { disposed = true; cancellation.Cancel(); cancellation.Dispose(); }
+
+    private sealed class ReviewFields
+    {
+        [Required, Range(typeof(decimal), "0", "99999999.99")] public decimal? Price { get; set; }
+        [Required, StringLength(500)] public string Location { get; set; } = "";
+        public bool Verified { get; set; }
+    }
+    private sealed record ReviewDetails(Guid RequestId, string PractitionerName, string CustomerName,
+        string CustomerEmail, string? CustomerPhone, string ServiceName, DateTimeOffset StartAtUtc, DateTimeOffset EndAtUtc,
+        string TimeZoneId, decimal Price, string CurrencyCode, string Location, bool IsFirstVisitRequested, string Status);
+    private sealed record ApiError(string Error);
+}

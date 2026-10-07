@@ -1,0 +1,114 @@
+@page "/practitioner"
+@using System.Text.Json
+@implements IDisposable
+@inject HttpClient Http
+@inject IConfiguration Configuration
+@inject NavigationManager Navigation
+
+<PageTitle>Practitioner Appointments | Return to Self Reiki</PageTitle>
+<HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
+
+<section class="page-hero"><div class="container"><h1>Practitioner Appointments</h1><p>Review requests and see your upcoming appointments.</p></div></section>
+<section class="content-section"><div class="container session-calendar">
+    @if (loading)
+    {
+        <p role="status">Loading appointments...</p>
+    }
+    else if (string.IsNullOrWhiteSpace(apiBaseUrl))
+    {
+        <p class="calendar-notice">Practitioner sign-in is not available on this site yet.</p>
+    }
+    else if (signInRequired)
+    {
+        <p>Sign in with the account your administrator authorized for practitioner access.</p>
+        <div class="calendar-navigation">
+            <button class="btn btn-navy" @onclick='() => SignIn("aad")'>Sign in with Microsoft</button>
+            <button class="btn btn-cream" @onclick='() => SignIn("github")'>Sign in with GitHub</button>
+        </div>
+    }
+    else if (inbox is not null)
+    {
+        <div class="calendar-toolbar"><p>Signed in as @inbox.UserDetails</p><button class="btn btn-cream" @onclick="SignOut">Sign out</button></div>
+        @if (inbox.Practitioners.Length == 0)
+        {
+            <p class="calendar-notice">Your account has not been assigned practitioner access. Give your administrator this account reference:</p>
+            <p><code>@inbox.IdentityProvider / @inbox.UserId</code></p>
+        }
+        else
+        {
+            @foreach (var person in inbox.Practitioners)
+            {
+                <h2>@person.DisplayName</h2>
+                @foreach (var status in new[] { "Requested", "Confirmed" })
+                {
+                    <h3>@(status == "Requested" ? "Pending requests" : "Upcoming appointments")</h3>
+                    var bookings = inbox.Bookings.Where(b => b.PractitionerId == person.PractitionerId && b.Status == status).OrderBy(b => b.StartAtUtc).ToArray();
+                    @if (bookings.Length == 0) { <p>@(status == "Requested" ? "No pending requests." : "No upcoming appointments.")</p> }
+                    @if (bookings.Length == 100) { <p>Showing the earliest 100 @(status == "Requested" ? "requests" : "appointments").</p> }
+                    @foreach (var booking in bookings)
+                    {
+                        <article class="calendar-notice">
+                            <h4>@booking.CustomerName &middot; @booking.ServiceName</h4>
+                            <p>@TimeZoneInfo.ConvertTime(booking.StartAtUtc, TimeZoneInfo.FindSystemTimeZoneById(booking.TimeZoneId == "Central Standard Time" ? "America/Chicago" : booking.TimeZoneId)).ToString("ddd, MMM d, yyyy 'at' h:mm tt") (@booking.TimeZoneId)</p>
+                            <a class="btn btn-navy" href="practitioner/requests/@booking.RequestId">@(status == "Requested" ? "Review request" : "View appointment")</a>
+                        </article>
+                    }
+                }
+            }
+        }
+    }
+    @if (!string.IsNullOrEmpty(error)) { <p class="calendar-notice" role="alert">@error</p> }
+    @if (!loading && !string.IsNullOrWhiteSpace(apiBaseUrl) && !signInRequired)
+    {
+        <button class="btn btn-cream" @onclick="LoadAsync">Refresh appointments</button>
+    }
+</div></section>
+
+@code {
+    private readonly CancellationTokenSource cancellation = new();
+    private Inbox? inbox;
+    private string? apiBaseUrl;
+    private string? error;
+    private bool loading = true;
+    private bool signInRequired;
+    private bool disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        apiBaseUrl = Configuration["ScheduleApiBaseUrl"];
+        if (!string.IsNullOrWhiteSpace(apiBaseUrl)) await LoadAsync();
+        else loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        inbox = null;
+        error = null;
+        try
+        {
+            using var response = await Http.GetAsync($"{apiBaseUrl!.TrimEnd('/')}/practitioner/requests", cancellation.Token);
+            if (disposed) return;
+            signInRequired = response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden;
+            if (signInRequired) return;
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<Inbox>(cancellation.Token) ?? throw new JsonException("Missing appointments.");
+            if (!disposed) inbox = result;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed) error = "We couldn't load your appointments. Please try again.";
+        }
+        finally { loading = false; }
+    }
+
+    private void SignIn(string provider) => Navigation.NavigateTo($"/.auth/login/{provider}?post_login_redirect_uri={Uri.EscapeDataString(new Uri(new Uri(Navigation.BaseUri), "practitioner").AbsoluteUri)}", forceLoad: true);
+    private void SignOut() => Navigation.NavigateTo("/.auth/logout?post_logout_redirect_uri=/practitioner", forceLoad: true);
+    public void Dispose() { disposed = true; cancellation.Cancel(); cancellation.Dispose(); }
+
+    private sealed record Inbox(string IdentityProvider, string UserId, string UserDetails, Person[] Practitioners, BookingSummary[] Bookings);
+    private sealed record Person(int PractitionerId, string DisplayName);
+    private sealed record BookingSummary(Guid RequestId, int PractitionerId, string CustomerName, string ServiceName,
+        DateTimeOffset StartAtUtc, string TimeZoneId, string Status);
+}
