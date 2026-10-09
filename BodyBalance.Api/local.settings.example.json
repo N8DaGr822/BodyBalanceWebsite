@@ -9,7 +9,7 @@
     "NotificationTestEmail": "",
     "NotificationTestPhone": "",
     "NotificationFromEmail": "",
-    "SendGridApiKey": "",
+    "ResendApiKey": "",
     "TwilioAccountSid": "",
     "TwilioApiKeySid": "",
     "TwilioApiKeySecret": "",

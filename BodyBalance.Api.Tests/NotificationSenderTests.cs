@@ -10,23 +10,27 @@ public class NotificationSenderTests
     private const string Key = "test-key-with-at-least-thirty-two-bytes";
 
     [Fact]
-    public async Task EmailGoesOnlyToTheChosenRecipientAndDisablesLinkTracking()
+    public async Task EmailGoesOnlyToTheChosenRecipientAndPreservesPrivateReviewLink()
     {
         var notification = Notification("Email");
         using var http = new HttpClient(new Handler(async request =>
         {
-            Assert.Equal("https://api.sendgrid.com/v3/mail/send", request.RequestUri!.AbsoluteUri);
+            Assert.Equal("https://api.resend.com/emails", request.RequestUri!.AbsoluteUri);
             Assert.Equal("Bearer", request.Headers.Authorization!.Scheme);
+            Assert.Equal("test-only-key", request.Headers.Authorization.Parameter);
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var root = json.RootElement;
-            Assert.Equal("practitioner@example.com", root.GetProperty("personalizations")[0].GetProperty("to")[0].GetProperty("email").GetString());
-            Assert.False(root.GetProperty("tracking_settings").GetProperty("click_tracking").GetProperty("enable").GetBoolean());
-            var text = root.GetProperty("content")[0].GetProperty("value").GetString()!;
+            Assert.Equal(1, root.GetProperty("to").GetArrayLength());
+            Assert.Equal("practitioner@example.com", root.GetProperty("to")[0].GetString());
+            Assert.False(root.TryGetProperty("reply_to", out _));
+            var text = root.GetProperty("text").GetString()!;
             Assert.Contains($"https://example.com/review-request#{notification.RequestId:D}.", text);
             Assert.DoesNotContain("CustomerEmail", text);
-            return new(HttpStatusCode.Accepted);
+            return new(HttpStatusCode.OK) { Content = new StringContent("{\"id\":\"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794\"}") };
         }));
-        Assert.Equal("Accepted", (await new NotificationSender(http, Config()).SendAsync(notification, default)).State);
+        var result = await new NotificationSender(http, Config()).SendAsync(notification, default);
+        Assert.Equal("Accepted", result.State);
+        Assert.Equal("49a3999c-0ce1-4ea6-ab68-afcd6dc2e794", result.ProviderId);
     }
 
     [Fact]
@@ -38,11 +42,11 @@ public class NotificationSenderTests
         using var http = new HttpClient(new Handler(async request =>
         {
             var body = await request.Content!.ReadAsStringAsync();
-            if (request.RequestUri!.Host == "api.sendgrid.com")
+            if (request.RequestUri!.Host == "api.resend.com")
             {
                 Assert.Contains("tester@example.com", body);
                 Assert.DoesNotContain("practitioner@example.com", body);
-                return new(HttpStatusCode.Accepted);
+                return new(HttpStatusCode.OK) { Content = new StringContent("{\"id\":\"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794\"}") };
             }
             Assert.Contains("To=%2B15551234567", body);
             Assert.DoesNotContain("To=%2B15559999999", body);
@@ -56,7 +60,9 @@ public class NotificationSenderTests
 
     [Theory]
     [InlineData(429, "Pending")]
+    [InlineData(202, "NeedsReview")]
     [InlineData(401, "NeedsReview")]
+    [InlineData(403, "NeedsReview")]
     [InlineData(500, "NeedsReview")]
     public async Task RateLimitsRetryButRejectedOrUncertainOutcomesNeedReview(int status, string expected)
     {
@@ -75,7 +81,24 @@ public class NotificationSenderTests
     }
 
     [Theory]
-    [InlineData("SendGridApiKey", "", "EmailNotConfigured")]
+    [InlineData("{\"id\":\"\"}", "EmailNotAccepted")]
+    [InlineData("{\"id\":\" \"}", "EmailNotAccepted")]
+    [InlineData("{\"id\":null}", "EmailNotAccepted")]
+    [InlineData("{}", "ProviderOutcomeUnknown")]
+    [InlineData("{\"id\":123}", "ProviderOutcomeUnknown")]
+    [InlineData("not-json", "ProviderOutcomeUnknown")]
+    public async Task EmailSuccessWithoutAUsableProviderIdNeedsReview(string body, string expected)
+    {
+        using var http = new HttpClient(new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new StringContent(body) })));
+        var result = await new NotificationSender(http, Config()).SendAsync(Notification("Email"), default);
+        Assert.Equal("NeedsReview", result.State);
+        Assert.Null(result.ProviderId);
+        Assert.Equal(expected, result.Error);
+    }
+
+    [Theory]
+    [InlineData("ResendApiKey", "", "EmailNotConfigured")]
     [InlineData("BookingSiteUrl", "http://example.com", "ReviewLinkNotConfigured")]
     [InlineData("BookingSiteUrl", "https://example.com/path", "ReviewLinkNotConfigured")]
     [InlineData("NotificationTestEmail", "tester@example.com", "IncompleteTestRecipients")]
@@ -113,12 +136,12 @@ public class NotificationSenderTests
         {
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var root = json.RootElement;
-            Assert.Equal("practice@example.com", root.GetProperty("personalizations")[0].GetProperty("to")[0].GetProperty("email").GetString());
-            Assert.Equal("sender@example.com", root.GetProperty("from").GetProperty("email").GetString());
-            Assert.Equal("client@example.com", root.GetProperty("reply_to").GetProperty("email").GetString());
+            Assert.Equal("practice@example.com", root.GetProperty("to")[0].GetString());
+            Assert.Equal("Return to Self Reiki <sender@example.com>", root.GetProperty("from").GetString());
+            Assert.Equal("client@example.com", root.GetProperty("reply_to").GetString());
             Assert.Equal("Contact subject", root.GetProperty("subject").GetString());
-            Assert.Equal("Contact text", root.GetProperty("content")[0].GetProperty("value").GetString());
-            return new(HttpStatusCode.Accepted);
+            Assert.Equal("Contact text", root.GetProperty("text").GetString());
+            return new(HttpStatusCode.OK) { Content = new StringContent("{\"id\":\"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794\"}") };
         }));
         var notification = new NotificationMessage("Email", "practice@example.com", "Contact subject", "Contact text", "Contact alert", "client@example.com");
         Assert.Equal("Accepted", (await new NotificationSender(http, configuration).SendAsync(notification, default)).State);
@@ -153,7 +176,7 @@ public class NotificationSenderTests
     private static IConfigurationRoot Config() => new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
     {
         ["BookingSiteUrl"] = "https://example.com", ["BookingReviewSigningKey"] = Key,
-        ["SendGridApiKey"] = "test-only-key", ["NotificationFromEmail"] = "sender@example.com",
+        ["ResendApiKey"] = "test-only-key", ["NotificationFromEmail"] = "sender@example.com",
         ["TwilioAccountSid"] = "AC" + new string('1', 32), ["TwilioApiKeySid"] = "SK" + new string('2', 32),
         ["TwilioApiKeySecret"] = "test-only-secret", ["NotificationFromPhone"] = "+15550000000"
     }).Build();

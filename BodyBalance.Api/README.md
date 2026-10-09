@@ -45,8 +45,8 @@ Configure these **backend** settings, never the public WASM settings:
 | `BookingSiteUrl` | The connected Azure site's HTTPS origin, such as `https://your-site.azurestaticapps.net` |
 | `BookingReviewSigningKey` | A cryptographically random secret, at least 32 bytes; required for new requests |
 | `NotificationDispatchKey` | A separate random secret of at least 32 characters |
-| `SendGridApiKey` | SendGrid API key with Mail Send permission |
-| `NotificationFromEmail` | A verified SendGrid sender |
+| `ResendApiKey` | Resend API key with Sending access, restricted to the verified sending domain |
+| `NotificationFromEmail` | An email address on the verified Resend domain, such as `notifications@entwinedandunwind.com` (address only) |
 | `TwilioAccountSid` | Twilio account SID (`AC...`) |
 | `TwilioApiKeySid` / `TwilioApiKeySecret` | Twilio API key (`SK...`) and secret with permission to create messages |
 | `NotificationFromPhone` | Your SMS-enabled Twilio number in E.164 format, with the applicable sender registration completed |
@@ -57,7 +57,9 @@ Configure these **backend** settings, never the public WASM settings:
 
 The requested test contacts and freshly generated signing/dispatch secrets are in the ignored `local.settings.json` on this workstation. These values are not deployed by GitHub. Copy the corresponding values privately into Azure's backend settings; keep API credentials out of chat, Git, and `wwwroot`. Use a non-production database for tests. A test recipient override redirects messages only; it does not prevent a test approval from reserving time in whichever database is configured.
 
-Provision Twilio and SendGrid accounts and senders before testing delivery. They can incur subscription, phone-number, registration and message charges; this repository does not purchase resources or send test messages during builds. Both channels use the providers' REST APIs through one injected `HttpClient`, without adding SDK dependencies. SendGrid link tracking is disabled. Booking notification text contains a private review link rather than customer contact information; general contact email contains the submitted message as described above.
+Provision Twilio and Resend accounts and senders before testing delivery. They can incur subscription, phone-number, registration and message charges; this repository does not purchase resources or send test messages during builds. Both channels use the providers' REST APIs through one injected `HttpClient`, without adding SDK dependencies. Resend click and open tracking must remain disabled on the sending domain so private approval links are not rewritten or retained by tracking redirects. Booking notification text contains a private review link rather than customer contact information; general contact email contains the submitted message as described above.
+
+For Resend, add `entwinedandunwind.com` under **Domains**, configure the sending DNS records in Cloudflare, and wait for **Verified**. Receiving is not required for these outbound notifications. In the domain's configuration, confirm click and open tracking are off. Create a domain-restricted key with **Sending access**, then set `ResendApiKey` and `NotificationFromEmail` in the Static Web App's production backend environment variables. The former `SendGridApiKey` setting is no longer used. Deploy the updated API before testing the website's booking or contact notifications; a Resend dashboard test alone does not exercise this code.
 
 For production routing, save each practitioner's `NotificationEmail` and `NotificationPhone` in the private `Practitioners` columns, and clear **both** test override settings. Null/unconfigured recipients leave a pending notification rather than guessing a destination. Leslie still needs her services, hours, and location configured before accepting new requests.
 
@@ -160,5 +162,5 @@ SQL may need to wake from auto-pause; if the first call returns 503, retry short
 - [Static Web Apps hosting plans](https://learn.microsoft.com/en-us/azure/static-web-apps/plans)
 - [Create Entra database users](https://learn.microsoft.com/en-us/sql/t-sql/statements/create-user-transact-sql)
 - [SWA authentication](https://learn.microsoft.com/en-us/azure/static-web-apps/authentication-authorization) and [trusted user information](https://learn.microsoft.com/en-us/azure/static-web-apps/user-information)
-- [Twilio message API](https://www.twilio.com/docs/messaging/api/message-resource) and [SendGrid Mail Send API](https://www.twilio.com/docs/sendgrid/api-reference/mail-send/mail-send)
+- [Twilio message API](https://www.twilio.com/docs/messaging/api/message-resource) and [Resend Send Email API](https://resend.com/docs/api-reference/emails/send-email)
 - [Azure Communication Services retirement](https://learn.microsoft.com/en-us/azure/communication-services/acs-retirement-and-breaking-changes-guide): why this implementation does not use ACS email/SMS

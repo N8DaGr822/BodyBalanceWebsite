@@ -46,24 +46,23 @@ public sealed class NotificationSender(HttpClient http, IConfiguration configura
         if (string.IsNullOrWhiteSpace(recipient)) recipient = notification.Recipient;
 
         using var request = new HttpRequestMessage(HttpMethod.Post, notification.Channel == "Email"
-            ? "https://api.sendgrid.com/v3/mail/send"
+            ? "https://api.resend.com/emails"
             : $"https://api.twilio.com/2010-04-01/Accounts/{Uri.EscapeDataString(configuration["TwilioAccountSid"] ?? "")}/Messages.json");
         if (notification.Channel == "Email")
         {
-            var apiKey = configuration["SendGridApiKey"];
+            var apiKey = configuration["ResendApiKey"];
             var from = configuration["NotificationFromEmail"];
             if (string.IsNullOrWhiteSpace(apiKey) || !ValidEmail(from) || !ValidEmail(recipient))
                 return new("Pending", Error: "EmailNotConfigured");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
             request.Content = JsonContent.Create(new
             {
-                personalizations = new[] { new { to = new[] { new { email = recipient } } } },
-                from = new { email = from, name = "Return to Self Reiki" },
+                to = new[] { recipient },
+                from = $"Return to Self Reiki <{from}>",
                 subject = notification.Subject,
-                reply_to = ValidEmail(notification.ReplyTo) ? new { email = notification.ReplyTo } : null,
-                content = new[] { new { type = "text/plain", value = notification.EmailText } },
-                // Tracking: Do not let a tracking redirect rewrite or retain the private approval link.
-                tracking_settings = new { click_tracking = new { enable = false, enable_text = false }, open_tracking = new { enable = false } }
+                reply_to = ValidEmail(notification.ReplyTo) ? notification.ReplyTo : null,
+                // Link Privacy: Keep click/open tracking disabled on the Resend sending domain.
+                text = notification.EmailText
             }, options: new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
         }
         else if (notification.Channel == "Sms")
@@ -88,8 +87,13 @@ public sealed class NotificationSender(HttpClient http, IConfiguration configura
         {
             using var response = await http.SendAsync(request, cancellationToken);
             if (response.StatusCode == HttpStatusCode.TooManyRequests) return new("Pending", Error: "ProviderRateLimited");
-            if (notification.Channel == "Email" && response.StatusCode == HttpStatusCode.Accepted)
-                return new("Accepted", response.Headers.TryGetValues("X-Message-Id", out var values) ? values.FirstOrDefault() : null);
+            if (notification.Channel == "Email" && response.StatusCode == HttpStatusCode.OK)
+            {
+                using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+                var id = json.RootElement.GetProperty("id").GetString();
+                return !string.IsNullOrWhiteSpace(id)
+                    ? new("Accepted", id) : new("NeedsReview", Error: "EmailNotAccepted");
+            }
             if (notification.Channel == "Sms" && response.StatusCode == HttpStatusCode.Created)
             {
                 using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
