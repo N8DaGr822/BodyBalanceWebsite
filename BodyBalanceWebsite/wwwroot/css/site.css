@@ -1135,3 +1135,20 @@ button {
         grid-template-columns: 1fr;
     }
 }
+
+/* Service landing pages and practitioner links */
+.services-grid--pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.service-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 1rem;
+}
+#practitioners, #mary, #leslie {
+    scroll-margin-top: 7rem;
+}
+@media (max-width: 720px) {
+    .services-grid--pair { grid-template-columns: 1fr; }
+}

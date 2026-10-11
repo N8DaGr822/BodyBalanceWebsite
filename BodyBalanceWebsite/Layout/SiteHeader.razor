@@ -14,17 +14,29 @@
             </span>
         </a>
 
-        <nav class="main-nav @(navOpen ? "open" : "")">
+        <nav id="main-navigation" aria-label="Main navigation" class="main-nav @(navOpen ? "open" : "")" @onkeydown="HandleKeyDown">
             <NavLink href="" Match="NavLinkMatch.All" @onclick="Close">Home</NavLink>
-            <NavLink href="about" @onclick="Close">About Me</NavLink>
-            <NavLink href="services" @onclick="Close">Services</NavLink>
+            <NavLink href="about" @onclick="Close">About Us</NavLink>
+            <div class="services-navigation">
+                <button type="button" class="services-toggle" aria-expanded="@(servicesOpen ? "true" : "false")" aria-controls="services-drawer" @onclick="ToggleServices" @ref="servicesToggle">
+                    Services
+                    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m4 6 4 4 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                </button>
+                @if (servicesOpen)
+                {
+                    <div id="services-drawer" class="services-drawer">
+                        <NavLink href="services/reiki" @onclick="Close">Reiki</NavLink>
+                        <NavLink href="services/body-balancing" @onclick="Close">Body Balancing</NavLink>
+                    </div>
+                }
+            </div>
             <NavLink href="faqs" @onclick="Close">FAQs</NavLink>
             <NavLink href="blog" @onclick="Close">Blog</NavLink>
             <NavLink href="contact" @onclick="Close">Contact</NavLink>
         </nav>
 
         <div class="header-cta">
-            <button class="nav-toggle" title="Toggle navigation" @onclick="Toggle">
+            <button type="button" class="nav-toggle" title="Toggle navigation" aria-label="Toggle navigation" aria-expanded="@(navOpen ? "true" : "false")" aria-controls="main-navigation" @onclick="Toggle">
                 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     @if (navOpen)
                     {
@@ -43,8 +55,29 @@
 
 @code {
     private bool navOpen;
+    private bool servicesOpen;
+    private ElementReference servicesToggle;
 
-    private void Toggle() => navOpen = !navOpen;
+    private void Toggle()
+    {
+        navOpen = !navOpen;
+        servicesOpen = false;
+    }
 
-    private void Close() => navOpen = false;
+    private void ToggleServices() => servicesOpen = !servicesOpen;
+
+    private void Close()
+    {
+        navOpen = false;
+        servicesOpen = false;
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape" && servicesOpen)
+        {
+            servicesOpen = false;
+            await servicesToggle.FocusAsync();
+        }
+    }
 }
