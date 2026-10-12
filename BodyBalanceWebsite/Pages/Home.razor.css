@@ -1,0 +1,42 @@
+/* Homepage Hero: Keep the image full width behind the copy at every breakpoint. */
+.hero--home {
+    position: relative;
+    isolation: isolate;
+}
+
+.hero--home .hero-art {
+    position: absolute;
+    inset: 0;
+    z-index: -2;
+    border-radius: 0;
+    aspect-ratio: auto;
+    background-position: center 70%;
+}
+
+.hero--home::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: linear-gradient(90deg, rgba(19, 39, 63, 0.8), rgba(19, 39, 63, 0.35) 55%, transparent);
+}
+
+.hero--home .container {
+    display: flex;
+    align-items: center;
+    min-height: clamp(32rem, 52vw, 44rem);
+}
+
+.hero--home .hero-copy {
+    max-width: 32rem;
+}
+
+@media (max-width: 720px) {
+    .hero--home::before {
+        background: rgba(19, 39, 63, 0.6);
+    }
+
+    .hero--home .container {
+        min-height: 32rem;
+    }
+}
