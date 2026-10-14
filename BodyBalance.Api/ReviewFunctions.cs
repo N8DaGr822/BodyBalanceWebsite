@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -34,14 +35,27 @@ public sealed partial class ScheduleFunctions
         {
             var identity = Identity(request);
             if (identity is null) return await JsonAsync(request, HttpStatusCode.Unauthorized, new { error = "Sign in to review appointments." });
+            DateTime? week = null;
+            if (request.Query["week"] is { } weekValue)
+            {
+                if (!DateTime.TryParseExact(weekValue, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                    DateTimeStyles.None, out var parsedWeek) || parsedWeek.Year < 2000 || parsedWeek.Year > 2100)
+                    return await JsonAsync(request, HttpStatusCode.BadRequest, new { error = "Provide a valid week start (yyyy-MM-dd, years 2000-2100)." });
+                week = parsedWeek;
+            }
             var allowed = PractitionerAccess.AllowedPractitioners(identity, configuration);
             var practitioners = allowed.Length == 0 ? [] : (await data.GetPractitionersAsync(cancellationToken))
                 .Where(p => allowed.Contains(p.PractitionerId)).ToList();
             var bookings = new List<BookingSummary>();
+            var schedule = new List<ScheduledAppointment>();
             foreach (var id in allowed)
+            {
                 bookings.AddRange(await data.GetPractitionerRequestsAsync(id, cancellationToken));
+                if (week is { } start)
+                    schedule.AddRange(await data.GetPractitionerScheduleAsync(id, start, cancellationToken));
+            }
             return await JsonAsync(request, HttpStatusCode.OK, new { identity.IdentityProvider, identity.UserId,
-                identity.UserDetails, practitioners, bookings });
+                identity.UserDetails, practitioners, bookings, schedule });
         }, cancellationToken);
 
     [Function("PractitionerReviewDetails")]

@@ -121,6 +121,32 @@ public sealed partial class ScheduleData
         return result is int id ? id : null;
     }
 
+    public async Task<List<ScheduledAppointment>> GetPractitionerScheduleAsync(int practitionerId, DateTime week, CancellationToken cancellationToken)
+    {
+        // Calendar Range: Convert both Central midnights separately so daylight-saving weeks stay accurate.
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
+        var start = TimeZoneInfo.ConvertTimeToUtc(week.Date, zone);
+        var end = TimeZoneInfo.ConvertTimeToUtc(week.Date.AddDays(7), zone);
+        await using var connection = await OpenAsync(cancellationToken);
+        using var command = new SqlCommand("""
+            SELECT BookingRequestId, CustomerName, ServiceName, StartAtUtc, EndAtUtc, Status
+            FROM dbo.Appointments
+            WHERE PractitionerId = @id AND Status IN ('Confirmed', 'Completed', 'NoShow')
+                AND StartAtUtc < @end AND EndAtUtc > @start
+            ORDER BY StartAtUtc, AppointmentId;
+            """, connection);
+        command.Parameters.Add("@id", SqlDbType.Int).Value = practitionerId;
+        command.Parameters.Add("@start", SqlDbType.DateTime2).Value = start;
+        command.Parameters.Add("@end", SqlDbType.DateTime2).Value = end;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var result = new List<ScheduledAppointment>();
+        while (await reader.ReadAsync(cancellationToken))
+            result.Add(new(reader.IsDBNull(0) ? null : reader.GetGuid(0), practitionerId, reader.GetString(1), reader.GetString(2),
+                DateTime.SpecifyKind(reader.GetDateTime(3), DateTimeKind.Utc),
+                DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc), reader.GetString(5)));
+        return result;
+    }
+
     public async Task<List<BookingSummary>> GetPractitionerRequestsAsync(int practitionerId, CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(cancellationToken);
@@ -150,3 +176,6 @@ public sealed partial class ScheduleData
 
 public sealed record BookingSummary(Guid RequestId, int PractitionerId, string CustomerName, string ServiceName,
     DateTime StartAtUtc, string TimeZoneId, string Status);
+
+public sealed record ScheduledAppointment(Guid? RequestId, int PractitionerId, string CustomerName, string ServiceName,
+    DateTime StartAtUtc, DateTime EndAtUtc, string Status);

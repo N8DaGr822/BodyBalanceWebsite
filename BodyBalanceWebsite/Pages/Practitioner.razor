@@ -1,14 +1,18 @@
 @page "/practitioner"
+@page "/admin"
+@using BlazorCalendar
+@using BlazorCalendar.Models
+@using System.Globalization
 @using System.Text.Json
 @implements IDisposable
 @inject HttpClient Http
 @inject IConfiguration Configuration
 @inject NavigationManager Navigation
 
-<PageTitle>Practitioner Appointments | Entwined &amp; Unwind</PageTitle>
+<PageTitle>Admin Appointments | Entwined &amp; Unwind</PageTitle>
 <HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
 
-<section class="page-hero"><div class="container"><h1>Practitioner Appointments</h1><p>Review requests and see your upcoming appointments.</p></div></section>
+<section class="page-hero"><div class="container"><h1>Appointment Admin</h1><p>Approve requests and view your weekly schedule.</p></div></section>
 <section class="content-section"><div class="container session-calendar">
     @if (loading)
     {
@@ -36,24 +40,63 @@
         }
         else
         {
+            <div class="calendar-practitioner">
+                <label for="admin-practitioner">Show appointments for</label>
+                <select id="admin-practitioner" @bind="practitionerId" @bind:after="UpdateCalendar">
+                    <option value="0">All authorized practitioners</option>
+                    @foreach (var person in inbox.Practitioners)
+                    {
+                        <option value="@person.PractitionerId">@person.DisplayName</option>
+                    }
+                </select>
+            </div>
+            <h2>Pending requests</h2>
+            <p>Review the price and address before approving. Pending requests do not reserve a time.</p>
             @foreach (var person in inbox.Practitioners)
             {
-                <h2>@person.DisplayName</h2>
-                @foreach (var status in new[] { "Requested", "Confirmed" })
+                @if (practitionerId == 0 || practitionerId == person.PractitionerId)
                 {
-                    <h3>@(status == "Requested" ? "Pending requests" : "Upcoming appointments")</h3>
-                    var bookings = inbox.Bookings.Where(b => b.PractitionerId == person.PractitionerId && b.Status == status).OrderBy(b => b.StartAtUtc).ToArray();
-                    @if (bookings.Length == 0) { <p>@(status == "Requested" ? "No pending requests." : "No upcoming appointments.")</p> }
-                    @if (bookings.Length == 100) { <p>Showing the earliest 100 @(status == "Requested" ? "requests" : "appointments").</p> }
+                    <h3>@person.DisplayName</h3>
+                    var bookings = inbox.Bookings.Where(b => b.PractitionerId == person.PractitionerId && b.Status == "Requested").OrderBy(b => b.StartAtUtc).ToArray();
+                    @if (bookings.Length == 0) { <p>No pending requests.</p> }
+                    @if (bookings.Length == 100) { <p>Showing the earliest 100 requests. Review these and refresh to see more.</p> }
                     @foreach (var booking in bookings)
                     {
                         <article class="calendar-notice">
                             <h4>@booking.CustomerName &middot; @booking.ServiceName</h4>
                             <p>@TimeZoneInfo.ConvertTime(booking.StartAtUtc, TimeZoneInfo.FindSystemTimeZoneById(booking.TimeZoneId == "Central Standard Time" ? "America/Chicago" : booking.TimeZoneId)).ToString("ddd, MMM d, yyyy 'at' h:mm tt") (@booking.TimeZoneId)</p>
-                            <a class="btn btn-navy" href="practitioner/requests/@booking.RequestId">@(status == "Requested" ? "Review request" : "View appointment")</a>
+                            <a class="btn btn-navy" href="admin/requests/@booking.RequestId">Review request</a>
                         </article>
                     }
                 }
+            }
+            <div class="calendar-toolbar">
+                <h2 id="admin-week" aria-live="polite">@week.ToString("MMM d, yyyy") &ndash; @week.AddDays(6).ToString("MMM d, yyyy")</h2>
+                <div class="calendar-navigation" role="group" aria-label="Weekly calendar navigation">
+                    <button type="button" class="btn btn-navy" disabled="@(week.AddDays(-7).Year < 2000)" @onclick="() => ChangeWeekAsync(-1)">Previous week</button>
+                    <button type="button" class="btn btn-cream" @onclick="ShowCurrentWeekAsync">This week</button>
+                    <button type="button" class="btn btn-navy" disabled="@(week.AddDays(7).Year > 2100)" @onclick="() => ChangeWeekAsync(1)">Next week</button>
+                </div>
+            </div>
+            <p>Reserved appointments are shown in Central Time. Select an appointment to view its details.</p>
+            <div class="calendar-grid" role="region" aria-labelledby="admin-week" tabindex="0">
+                <CalendarContainer @key="(week, appointments)" FirstDate="week" DisplayedView="DisplayedView.Weekly" TasksList="appointments" Draggable="false">
+                    <WeekView WeekDaysColor="var(--cream-pale)" SaturdayColor="var(--cream)" SundayColor="var(--cream)"
+                              HeaderStyle="background:var(--navy);color:var(--text-on-navy)" Draggable="false" TaskClick="OpenAppointment" />
+                </CalendarContainer>
+            </div>
+            <h3>Appointments this week</h3>
+            @if (scheduled.Length == 0) { <p>No reserved appointments this week.</p> }
+            @foreach (var booking in scheduled)
+            {
+                <article class="calendar-notice">
+                    <h4>@booking.CustomerName &middot; @booking.ServiceName &middot; @PractitionerName(booking.PractitionerId)</h4>
+                    <p>@LocalTime(booking.StartAtUtc).ToString("ddd, MMM d 'at' h:mm tt") &ndash; @LocalTime(booking.EndAtUtc).ToString("ddd, MMM d 'at' h:mm tt") (Central) &middot; @booking.Status</p>
+                    @if (booking.RequestId is { } requestId)
+                    {
+                        <a class="btn btn-navy" href="admin/requests/@requestId">View appointment</a>
+                    }
+                </article>
             }
         }
     }
@@ -72,6 +115,11 @@
     private bool loading = true;
     private bool signInRequired;
     private bool disposed;
+    private int practitionerId;
+    private DateTime week = CurrentWeek();
+    private ScheduledAppointment[] scheduled = [];
+    private Tasks[] appointments = [];
+    private static readonly TimeZoneInfo calendarZone = TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
 
     protected override async Task OnInitializedAsync()
     {
@@ -87,13 +135,18 @@
         error = null;
         try
         {
-            using var response = await Http.GetAsync($"{apiBaseUrl!.TrimEnd('/')}/practitioner/requests", cancellation.Token);
+            using var response = await Http.GetAsync($"{apiBaseUrl!.TrimEnd('/')}/practitioner/requests?week={week.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}", cancellation.Token);
             if (disposed) return;
             signInRequired = response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden;
             if (signInRequired) return;
             response.EnsureSuccessStatusCode();
             var result = await response.Content.ReadFromJsonAsync<Inbox>(cancellation.Token) ?? throw new JsonException("Missing appointments.");
-            if (!disposed) inbox = result;
+            if (!disposed)
+            {
+                inbox = result;
+                if (!inbox.Practitioners.Any(p => p.PractitionerId == practitionerId)) practitionerId = 0;
+                UpdateCalendar();
+            }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
@@ -103,12 +156,54 @@
         finally { loading = false; }
     }
 
-    private void SignIn(string provider) => Navigation.NavigateTo($"/.auth/login/{provider}?post_login_redirect_uri={Uri.EscapeDataString(new Uri(new Uri(Navigation.BaseUri), "practitioner").AbsoluteUri)}", forceLoad: true);
-    private void SignOut() => Navigation.NavigateTo("/.auth/logout?post_logout_redirect_uri=/practitioner", forceLoad: true);
+    private void UpdateCalendar()
+    {
+        scheduled = inbox!.Schedule.Where(b => practitionerId == 0 || b.PractitionerId == practitionerId).OrderBy(b => b.StartAtUtc).ToArray();
+        appointments = scheduled.Select((booking, index) => new Tasks
+        {
+            ID = index + 1, DateStart = LocalTime(booking.StartAtUtc), DateEnd = LocalTime(booking.EndAtUtc),
+            Caption = $"{booking.CustomerName} · {booking.ServiceName}", Code = $"{PractitionerName(booking.PractitionerId)} · {booking.CustomerName}",
+            Color = "#ece2cd", ForeColor = "#22304a", NotBeDraggable = true
+        }).ToArray();
+    }
+
+    private void OpenAppointment(ClickTaskParameter args)
+    {
+        var id = args.IDList.FirstOrDefault();
+        if (id > 0 && id <= scheduled.Length && scheduled[id - 1].RequestId is { } requestId)
+            Navigation.NavigateTo($"admin/requests/{requestId}");
+    }
+
+    private string PractitionerName(int id) => inbox!.Practitioners.FirstOrDefault(p => p.PractitionerId == id)?.DisplayName ?? "Practitioner";
+    private static DateTime LocalTime(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, calendarZone).DateTime;
+    private static DateTime CurrentWeek()
+    {
+        var today = LocalTime(DateTimeOffset.UtcNow).Date;
+        return today.AddDays(-((7 + (int)today.DayOfWeek - (int)CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek) % 7));
+    }
+
+    private async Task ChangeWeekAsync(int offset)
+    {
+        if (loading || week.AddDays(offset * 7).Year is < 2000 or > 2100) return;
+        week = week.AddDays(offset * 7);
+        await LoadAsync();
+    }
+
+    private async Task ShowCurrentWeekAsync()
+    {
+        if (loading) return;
+        week = CurrentWeek();
+        await LoadAsync();
+    }
+
+    private void SignIn(string provider) => Navigation.NavigateTo($"/.auth/login/{provider}?post_login_redirect_uri={Uri.EscapeDataString(new Uri(new Uri(Navigation.BaseUri), "admin").AbsoluteUri)}", forceLoad: true);
+    private void SignOut() => Navigation.NavigateTo("/.auth/logout?post_logout_redirect_uri=/admin", forceLoad: true);
     public void Dispose() { disposed = true; cancellation.Cancel(); cancellation.Dispose(); }
 
-    private sealed record Inbox(string IdentityProvider, string UserId, string UserDetails, Person[] Practitioners, BookingSummary[] Bookings);
+    private sealed record Inbox(string IdentityProvider, string UserId, string UserDetails, Person[] Practitioners, BookingSummary[] Bookings, ScheduledAppointment[] Schedule);
     private sealed record Person(int PractitionerId, string DisplayName);
     private sealed record BookingSummary(Guid RequestId, int PractitionerId, string CustomerName, string ServiceName,
         DateTimeOffset StartAtUtc, string TimeZoneId, string Status);
+    private sealed record ScheduledAppointment(Guid? RequestId, int PractitionerId, string CustomerName, string ServiceName,
+        DateTimeOffset StartAtUtc, DateTimeOffset EndAtUtc, string Status);
 }

@@ -1,0 +1,8 @@
+/* Weekly Calendar: Preserve readable day columns; the existing wrapper scrolls on small screens. */
+.calendar-grid ::deep .weekly-calendar {
+    min-width: 56rem;
+}
+
+.calendar-notice + .calendar-notice {
+    margin-top: 1rem;
+}
