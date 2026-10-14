@@ -23,6 +23,11 @@
                 </div>
             }
         </div>
+        <label for="login-remember" class="booking-first-visit">
+            <InputCheckbox id="login-remember" @bind-Value="model.RememberMe" />
+            Remember me on this device for 30 days
+        </label>
+        <p>Use this option only on your own device. Signing out ends the session.</p>
         <button type="submit" class="btn btn-navy">@(busy ? "Please wait..." : codeRequested ? "Sign in" : "Email me a sign-in code")</button>
         @if (codeRequested)
         {
@@ -53,7 +58,7 @@
             using var request = new HttpRequestMessage(HttpMethod.Post,
                 $"{Configuration["ScheduleApiBaseUrl"]!.TrimEnd('/')}/practitioner-login/{(codeRequested ? "verify" : "code")}");
             request.Headers.Add("X-Booking-Review", "1");
-            request.Content = JsonContent.Create(new { model.Email, model.Code });
+            request.Content = JsonContent.Create(new { model.Email, model.Code, model.RememberMe });
             using var response = await Http.SendAsync(request, cancellation.Token);
             if (disposed) return;
             if (!response.IsSuccessStatusCode)
@@ -86,6 +91,7 @@
     {
         [Required, EmailAddress, StringLength(254)] public string Email { get; set; } = "";
         public string Code { get; set; } = "";
+        public bool RememberMe { get; set; }
     }
     private sealed record LoginResponse(string? Message, string? Error);
 }

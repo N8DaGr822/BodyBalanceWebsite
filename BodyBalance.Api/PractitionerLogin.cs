@@ -4,13 +4,14 @@ using System.Text;
 
 namespace BodyBalance.Api;
 
-public sealed record PractitionerLoginRequest(string? Email, string? Code = null);
+public sealed record PractitionerLoginRequest(string? Email, string? Code = null, bool RememberMe = false);
 public sealed record PractitionerSession(int PractitionerId, string Email);
 
 public static class PractitionerLogin
 {
     public const string CookieName = "__Host-BBPractitioner";
     public const int SessionHours = 8;
+    public static int SessionHoursFor(bool rememberMe) => rememberMe ? 30 * 24 : SessionHours;
 
     public static string NormalizeEmail(string? email)
     {
@@ -42,6 +43,6 @@ public static class PractitionerLogin
         return ValidSession(value) ? value : null;
     }
 
-    public static string SessionCookie(string token, bool clear = false) =>
-        $"{CookieName}={token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={(clear ? 0 : SessionHours * 3600)}";
+    public static string SessionCookie(string token, bool clear = false, bool rememberMe = false) =>
+        $"{CookieName}={token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={(clear ? 0 : SessionHoursFor(rememberMe) * 3600)}";
 }

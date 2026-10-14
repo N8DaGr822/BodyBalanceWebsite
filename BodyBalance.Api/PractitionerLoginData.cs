@@ -25,7 +25,7 @@ public sealed partial class ScheduleData
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
-    public async Task<bool> VerifySignInCodeAsync(string email, byte[] codeHash, byte[] sessionHash, CancellationToken cancellationToken)
+    public async Task<bool> VerifySignInCodeAsync(string email, byte[] codeHash, byte[] sessionHash, CancellationToken cancellationToken, bool rememberMe = false)
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
@@ -60,7 +60,8 @@ public sealed partial class ScheduleData
                 """, connection, transaction);
             command.Parameters.Add("@hash", SqlDbType.Binary, 32).Value = sessionHash;
             command.Parameters.Add("@id", SqlDbType.Int).Value = practitionerId;
-            command.Parameters.Add("@hours", SqlDbType.Int).Value = PractitionerLogin.SessionHours;
+            // Remember Me: Match the server expiration to the persistent cookie; never renew on ordinary requests.
+            command.Parameters.Add("@hours", SqlDbType.Int).Value = PractitionerLogin.SessionHoursFor(rememberMe);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);

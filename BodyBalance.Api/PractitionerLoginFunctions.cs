@@ -37,10 +37,10 @@ public sealed partial class ScheduleFunctions
                 return await JsonAsync(request, HttpStatusCode.Unauthorized, new { error = "Enter a valid six-digit code." });
             var token = PractitionerLogin.CreateSession();
             var hash = PractitionerLogin.CodeHash(email, input.Code!, configuration["BookingReviewSigningKey"]);
-            if (!await data.VerifySignInCodeAsync(email, hash, PractitionerLogin.SessionHash(token), cancellationToken))
+            if (!await data.VerifySignInCodeAsync(email, hash, PractitionerLogin.SessionHash(token), cancellationToken, input.RememberMe))
                 return await JsonAsync(request, HttpStatusCode.Unauthorized, new { error = "This code is invalid or expired. Request a new code and try again." });
             var response = await JsonAsync(request, HttpStatusCode.OK, new { signedIn = true });
-            response.Headers.Add("Set-Cookie", PractitionerLogin.SessionCookie(token));
+            response.Headers.Add("Set-Cookie", PractitionerLogin.SessionCookie(token, rememberMe: input.RememberMe));
             return response;
         }, cancellationToken, "Sign-in is temporarily unavailable. Please try again shortly.");
 

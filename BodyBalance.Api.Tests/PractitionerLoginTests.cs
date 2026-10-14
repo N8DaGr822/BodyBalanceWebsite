@@ -61,4 +61,26 @@ public class PractitionerLoginTests
         Assert.DoesNotContain("Domain=", cookie);
         Assert.EndsWith("Max-Age=0", PractitionerLogin.SessionCookie("", clear: true));
     }
+
+    [Theory]
+    [InlineData(false, 8, 28800)]
+    [InlineData(true, 720, 2592000)]
+    public void RememberMeUsesTheSameBoundedLifetimeForSqlAndCookie(bool rememberMe, int hours, int seconds)
+    {
+        Assert.Equal(hours, PractitionerLogin.SessionHoursFor(rememberMe));
+        var cookie = PractitionerLogin.SessionCookie(PractitionerLogin.CreateSession(), rememberMe: rememberMe);
+        Assert.EndsWith($"Max-Age={seconds}", cookie);
+        Assert.Contains("Secure; HttpOnly; SameSite=Strict", cookie);
+        Assert.EndsWith("Max-Age=0", PractitionerLogin.SessionCookie("", clear: true, rememberMe: rememberMe));
+    }
+
+    [Fact]
+    public void OlderClientsDoNotOptIntoLongerSessions()
+    {
+        var input = System.Text.Json.JsonSerializer.Deserialize<PractitionerLoginRequest>(
+            "{\"email\":\"mary@example.com\",\"code\":\"123456\"}",
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.NotNull(input);
+        Assert.False(input.RememberMe);
+    }
 }
