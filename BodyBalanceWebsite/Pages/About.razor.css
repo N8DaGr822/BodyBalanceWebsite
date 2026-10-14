@@ -1,0 +1,107 @@
+.reviews-toggle {
+    position: fixed;
+    top: 50%;
+    right: 0;
+    z-index: 51;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--gold);
+    border-right: 0;
+    border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+    background: var(--navy);
+    color: var(--cream);
+    box-shadow: 0 4px 18px rgba(19, 39, 63, 0.18);
+    cursor: pointer;
+}
+
+.reviews-drawer {
+    position: fixed;
+    inset: 0 0 0 auto;
+    z-index: 52;
+    width: max(25vw, 320px);
+    max-width: 100%;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    background: var(--cream-pale);
+    color: var(--text-dark);
+    border-left: 1px solid var(--gold);
+    box-shadow: -8px 0 32px rgba(19, 39, 63, 0.18);
+    animation: reviews-enter 220ms ease-out;
+}
+
+.reviews-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.5rem;
+    background: var(--navy);
+    color: var(--cream);
+}
+
+.reviews-header h2 {
+    flex: 1;
+    margin: 0;
+    font-size: 1.5rem;
+}
+
+.reviews-close {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--gold);
+    border-radius: 50%;
+    background: transparent;
+    color: var(--cream);
+    font-size: 1.75rem;
+    cursor: pointer;
+}
+
+.reviews-content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 1.5rem;
+}
+
+.review-card {
+    margin: 0 0 1.25rem;
+    padding: 1.25rem;
+    border: 1px solid var(--gold);
+    border-radius: var(--radius-card);
+    background: var(--cream);
+    overflow-wrap: anywhere;
+}
+
+.review-card blockquote {
+    margin: 0;
+}
+
+.review-card figcaption {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.reviews-toggle:focus-visible,
+.reviews-close:focus-visible,
+.reviews-content:focus-visible {
+    outline: 3px solid var(--gold);
+    outline-offset: -4px;
+}
+
+@keyframes reviews-enter {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+}
+
+@media (max-width: 600px) {
+    .reviews-drawer {
+        width: 90vw;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .reviews-drawer {
+        animation: none;
+    }
+}
