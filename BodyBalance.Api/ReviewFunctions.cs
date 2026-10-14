@@ -33,7 +33,7 @@ public sealed partial class ScheduleFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "practitioner/requests")] HttpRequestData request,
         CancellationToken cancellationToken) => ExecuteAsync(request, async () =>
         {
-            var identity = Identity(request);
+            var (identity, allowed) = await AccessAsync(request, cancellationToken);
             if (identity is null) return await JsonAsync(request, HttpStatusCode.Unauthorized, new { error = "Sign in to review appointments." });
             DateTime? week = null;
             if (request.Query["week"] is { } weekValue)
@@ -43,7 +43,6 @@ public sealed partial class ScheduleFunctions
                     return await JsonAsync(request, HttpStatusCode.BadRequest, new { error = "Provide a valid week start (yyyy-MM-dd, years 2000-2100)." });
                 week = parsedWeek;
             }
-            var allowed = PractitionerAccess.AllowedPractitioners(identity, configuration);
             var practitioners = allowed.Length == 0 ? [] : (await data.GetPractitionersAsync(cancellationToken))
                 .Where(p => allowed.Contains(p.PractitionerId)).ToList();
             var bookings = new List<BookingSummary>();
@@ -99,9 +98,8 @@ public sealed partial class ScheduleFunctions
 
     private async Task<int?> AuthorizedPractitionerAsync(HttpRequestData request, Guid id, CancellationToken cancellationToken)
     {
-        var identity = Identity(request);
+        var (identity, allowed) = await AccessAsync(request, cancellationToken);
         if (identity is null) return null;
-        var allowed = PractitionerAccess.AllowedPractitioners(identity, configuration);
         if (allowed.Length == 0) return null;
         var practitionerId = await data.GetBookingPractitionerAsync(id, cancellationToken);
         return practitionerId is { } value && allowed.Contains(value) ? value : null;

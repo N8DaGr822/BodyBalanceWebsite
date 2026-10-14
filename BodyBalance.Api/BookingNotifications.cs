@@ -6,6 +6,12 @@ namespace BodyBalance.Api;
 public sealed class BookingNotifications(ScheduleData data, NotificationSender sender, IConfiguration configuration,
     ILogger<BookingNotifications> logger)
 {
+    public Task<NotificationResult> SendSignInCodeAsync(string email, string code, CancellationToken cancellationToken) =>
+        // Authentication Delivery: Codes must never be redirected by notification test settings.
+        sender.SendAsync(new NotificationMessage("Email", email, "Your Entwined & Unwind sign-in code",
+            $"Your sign-in code is: {code}\n\nEnter it on the Entwined & Unwind sign-in page. It expires in 10 minutes and can be used once.\nIf you did not request this code, ignore this email. Do not share the code.", ""),
+            cancellationToken, applyTestRouting: false);
+
     public async Task<int> DispatchAsync(Guid? requestId, CancellationToken cancellationToken)
     {
         var processed = 0;

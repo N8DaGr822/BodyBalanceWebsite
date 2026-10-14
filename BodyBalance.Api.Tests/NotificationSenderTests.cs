@@ -10,6 +10,22 @@ public class NotificationSenderTests
     private const string Key = "test-key-with-at-least-thirty-two-bytes";
 
     [Fact]
+    public async Task AuthenticationEmailCannotBeRedirectedToTheNotificationTester()
+    {
+        var configuration = Config();
+        configuration["NotificationTestEmail"] = "tester@example.com";
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            Assert.Equal("mary@example.com", json.RootElement.GetProperty("to")[0].GetString());
+            return new(HttpStatusCode.OK) { Content = new StringContent("{\"id\":\"sign-in-email\"}") };
+        }));
+        var result = await new NotificationSender(http, configuration).SendAsync(
+            new NotificationMessage("Email", "mary@example.com", "Sign in", "123456", ""), default, applyTestRouting: false);
+        Assert.Equal("Accepted", result.State);
+    }
+
+    [Fact]
     public async Task EmailGoesOnlyToTheChosenRecipientAndPreservesPrivateReviewLink()
     {
         var notification = Notification("Email");

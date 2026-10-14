@@ -24,7 +24,8 @@
     }
     else if (signInRequired)
     {
-        <p>Sign in with the account your administrator authorized for practitioner access.</p>
+        <PractitionerSignIn OnSignedIn="LoadAsync" />
+        <p>Developer administrator sign-in</p>
         <div class="calendar-navigation">
             @if (Configuration.GetValue<bool>("GoogleAuthenticationEnabled"))
             {
@@ -42,6 +43,7 @@
         <div class="calendar-toolbar"><p>Signed in as @inbox.UserDetails</p><button class="btn btn-cream" @onclick="SignOut">Sign out</button></div>
         @if (inbox.Practitioners.Length == 0)
         {
+            <PractitionerSignIn OnSignedIn="LoadAsync" />
             <p class="calendar-notice">Your account has not been assigned practitioner access. Give your administrator this account reference:</p>
             <p><code>@inbox.IdentityProvider / @inbox.UserId</code></p>
         }
@@ -204,7 +206,23 @@
     }
 
     private void SignIn(string provider) => Navigation.NavigateTo($"/.auth/login/{provider}?post_login_redirect_uri={Uri.EscapeDataString(new Uri(new Uri(Navigation.BaseUri), "admin").AbsoluteUri)}", forceLoad: true);
-    private void SignOut() => Navigation.NavigateTo("/.auth/logout?post_logout_redirect_uri=/admin", forceLoad: true);
+    private async Task SignOut()
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{apiBaseUrl!.TrimEnd('/')}/practitioner-login/logout");
+            request.Headers.Add("X-Booking-Review", "1");
+            request.Content = JsonContent.Create(new { });
+            using var response = await Http.SendAsync(request, cancellation.Token);
+            response.EnsureSuccessStatusCode();
+            if (!disposed) Navigation.NavigateTo("/.auth/logout?post_logout_redirect_uri=/admin", forceLoad: true);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+        {
+            if (!disposed) error = "We couldn't sign you out. Please try again.";
+        }
+    }
     public void Dispose() { disposed = true; cancellation.Cancel(); cancellation.Dispose(); }
 
     private sealed record Inbox(string IdentityProvider, string UserId, string UserDetails, Person[] Practitioners, BookingSummary[] Bookings, ScheduledAppointment[] Schedule);

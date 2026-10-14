@@ -1,0 +1,91 @@
+@using System.ComponentModel.DataAnnotations
+@using System.Net.Http.Json
+@using System.Text.Json
+@implements IDisposable
+@inject HttpClient Http
+@inject IConfiguration Configuration
+
+<EditForm Model="model" OnValidSubmit="SubmitAsync" class="booking-form">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+    <fieldset disabled="@busy">
+        <legend>Practitioner sign-in</legend>
+        <div class="contact-form">
+            <div>
+                <label for="login-email">Email</label>
+                <InputText id="login-email" type="email" autocomplete="username" @bind-Value="model.Email" readonly="@codeRequested" />
+            </div>
+            @if (codeRequested)
+            {
+                <div>
+                    <label for="login-code">Six-digit sign-in code</label>
+                    <InputText id="login-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" @bind-Value="model.Code" />
+                </div>
+            }
+        </div>
+        <button type="submit" class="btn btn-navy">@(busy ? "Please wait..." : codeRequested ? "Sign in" : "Email me a sign-in code")</button>
+        @if (codeRequested)
+        {
+            <button type="button" class="btn btn-cream" @onclick="StartAgain">Use another email or request a new code</button>
+        }
+    </fieldset>
+    @if (message is not null) { <p role="status">@message</p> }
+    @if (error is not null) { <p class="calendar-notice" role="alert">@error</p> }
+</EditForm>
+
+@code {
+    [Parameter] public EventCallback OnSignedIn { get; set; }
+    private readonly LoginDetails model = new();
+    private readonly CancellationTokenSource cancellation = new();
+    private bool codeRequested;
+    private bool busy;
+    private bool disposed;
+    private string? message;
+    private string? error;
+
+    private async Task SubmitAsync()
+    {
+        if (busy) return;
+        busy = true;
+        error = null;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post,
+                $"{Configuration["ScheduleApiBaseUrl"]!.TrimEnd('/')}/practitioner-login/{(codeRequested ? "verify" : "code")}");
+            request.Headers.Add("X-Booking-Review", "1");
+            request.Content = JsonContent.Create(new { model.Email, model.Code });
+            using var response = await Http.SendAsync(request, cancellation.Token);
+            if (disposed) return;
+            if (!response.IsSuccessStatusCode)
+            {
+                var failure = await response.Content.ReadFromJsonAsync<LoginResponse>(cancellation.Token);
+                if (!disposed) error = failure?.Error ?? "We couldn't complete sign-in. Please try again.";
+                return;
+            }
+            if (codeRequested)
+            {
+                await OnSignedIn.InvokeAsync();
+            }
+            else
+            {
+                var result = await response.Content.ReadFromJsonAsync<LoginResponse>(cancellation.Token);
+                if (!disposed) { message = result?.Message; codeRequested = true; }
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed) error = "We couldn't complete sign-in. Please try again.";
+        }
+        finally { busy = false; }
+    }
+
+    private void StartAgain() { codeRequested = false; model.Code = ""; message = null; error = null; }
+    public void Dispose() { disposed = true; cancellation.Cancel(); cancellation.Dispose(); }
+    private sealed class LoginDetails
+    {
+        [Required, EmailAddress, StringLength(254)] public string Email { get; set; } = "";
+        public string Code { get; set; } = "";
+    }
+    private sealed record LoginResponse(string? Message, string? Error);
+}

@@ -2,6 +2,10 @@
 
 Target: Azure SQL database `bodybalance` on `body-balance.database.windows.net`.
 
+## Practitioner email sign-in (version 6)
+
+After version 5, apply `006_practitioner_login.sql`, then `configure_api_login_access.sql`. This creates empty account/session tables; no accounts are automatically authorized. An administrator must explicitly provision and enable each approved email with its practitioner ID. The API can update code/attempt fields and create/revoke sessions, but cannot create accounts or change their identity, email or enabled state. Notification addresses do not confer login access. See the API README for security limits, revocation and verification steps.
+
 ## Apply the initial schema
 
 1. Open the database's Azure Query editor and connect with Microsoft Entra authentication.

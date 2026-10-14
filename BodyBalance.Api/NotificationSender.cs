@@ -36,10 +36,10 @@ public sealed class NotificationSender(HttpClient http, IConfiguration configura
     }
 
     // Shared Delivery: Booking requests and contact messages use the same providers, test routing and failure policy.
-    public async Task<NotificationResult> SendAsync(NotificationMessage notification, CancellationToken cancellationToken)
+    public async Task<NotificationResult> SendAsync(NotificationMessage notification, CancellationToken cancellationToken, bool applyTestRouting = true)
     {
-        var testEmail = configuration["NotificationTestEmail"];
-        var testPhone = configuration["NotificationTestPhone"];
+        var testEmail = applyTestRouting ? configuration["NotificationTestEmail"] : null;
+        var testPhone = applyTestRouting ? configuration["NotificationTestPhone"] : null;
         var testRecipient = notification.Channel == "Email" ? testEmail : testPhone;
         // Test Routing: A configured override pauses channels without a test recipient; never fall back to live recipients.
         if ((!string.IsNullOrWhiteSpace(testEmail) || !string.IsNullOrWhiteSpace(testPhone))
