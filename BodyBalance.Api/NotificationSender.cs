@@ -40,10 +40,12 @@ public sealed class NotificationSender(HttpClient http, IConfiguration configura
     {
         var testEmail = configuration["NotificationTestEmail"];
         var testPhone = configuration["NotificationTestPhone"];
-        if (string.IsNullOrWhiteSpace(testEmail) != string.IsNullOrWhiteSpace(testPhone))
+        var testRecipient = notification.Channel == "Email" ? testEmail : testPhone;
+        // Test Routing: A configured override pauses channels without a test recipient; never fall back to live recipients.
+        if ((!string.IsNullOrWhiteSpace(testEmail) || !string.IsNullOrWhiteSpace(testPhone))
+            && string.IsNullOrWhiteSpace(testRecipient))
             return new("Pending", Error: "IncompleteTestRecipients");
-        var recipient = (notification.Channel == "Email" ? testEmail : testPhone) ?? notification.Recipient;
-        if (string.IsNullOrWhiteSpace(recipient)) recipient = notification.Recipient;
+        var recipient = string.IsNullOrWhiteSpace(testRecipient) ? notification.Recipient : testRecipient;
 
         using var request = new HttpRequestMessage(HttpMethod.Post, notification.Channel == "Email"
             ? "https://api.resend.com/emails"
@@ -58,7 +60,7 @@ public sealed class NotificationSender(HttpClient http, IConfiguration configura
             request.Content = JsonContent.Create(new
             {
                 to = new[] { recipient },
-                from = $"Return to Self Reiki <{from}>",
+                from = $"Entwined & Unwind <{from}>",
                 subject = notification.Subject,
                 reply_to = ValidEmail(notification.ReplyTo) ? notification.ReplyTo : null,
                 // Link Privacy: Keep click/open tracking disabled on the Resend sending domain.

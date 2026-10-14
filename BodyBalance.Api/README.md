@@ -30,7 +30,7 @@ First-visit pricing is provisional: it requires a customer claim and no non-canc
 
 Apply `database/004_contact_messages.sql` after version 3, then `database/configure_api_contact_access.sql`, before deploying this API. General enquiries use `ContactMessages` and `ContactNotifications` and never create appointments. Submission accepts `requestId` (a client GUID preserved on retries), `name` (150 characters), `email` (254), optional `phone` (30), and `message` (4,000). The server validates and normalizes values, saves the message and both notifications in one transaction, and returns a receipt containing only `requestId`. Matching GUID retries return the original receipt; different content with that GUID returns 409. The form locks the original values after an uncertain outcome so its retry cannot silently become a second message.
 
-Configure `ContactRecipientEmail` and `ContactRecipientPhone` in private backend settings for the single shared practice destination. The same paired `NotificationTestEmail` / `NotificationTestPhone` overrides used for bookings apply here. The email contains the message and contact details, with the visitor's email as Reply-To and the configured verified sender as From. SMS is a short alert to check email, without the visitor's message or contact details. These messages require no approval link and do not appear in the practitioner's appointment inbox.
+Configure `ContactRecipientEmail` and `ContactRecipientPhone` in private backend settings for the single shared practice destination. The same `NotificationTestEmail` / `NotificationTestPhone` overrides used for bookings apply here. If either override is set, channels without a test recipient stay pending rather than sending to a live recipient. The email contains the message and contact details, with the visitor's email as Reply-To and the configured verified sender as From. SMS is a short alert to check email, without the visitor's message or contact details. These messages require no approval link and do not appear in the practitioner's appointment inbox.
 
 `ContactMessagesPerHour` defaults to `20` across the practice. A transaction lock makes the hourly limit and GUID check atomic; replaying a saved message does not consume another allowance. This bounds new messages and notification costs but is not bot detection. The existing notification sender, dispatch endpoint and retry workflow handle both outboxes with the same delivery/reconciliation policy below.
 
@@ -50,7 +50,7 @@ Configure these **backend** settings, never the public WASM settings:
 | `TwilioAccountSid` | Twilio account SID (`AC...`) |
 | `TwilioApiKeySid` / `TwilioApiKeySecret` | Twilio API key (`SK...`) and secret with permission to create messages |
 | `NotificationFromPhone` | Your SMS-enabled Twilio number in E.164 format, with the applicable sender registration completed |
-| `NotificationTestEmail` / `NotificationTestPhone` | Optional paired override: sends booking and general contact notifications to the tester |
+| `NotificationTestEmail` / `NotificationTestPhone` | Optional test overrides: configured channels send to the tester; channels without a test recipient stay pending |
 | `ContactRecipientEmail` / `ContactRecipientPhone` | Shared practice contact for general messages; phone uses E.164 format |
 | `ContactMessagesPerHour` | Default `20`; limits new general messages across the practice, excluding GUID replays |
 | `BookingRequestsPerPractitionerPerHour` | Default `20`; limits new anonymous requests/notification costs, without counting GUID replays twice |
@@ -61,7 +61,7 @@ Provision Twilio and Resend accounts and senders before testing delivery. They c
 
 For Resend, add `entwinedandunwind.com` under **Domains**, configure the sending DNS records in Cloudflare, and wait for **Verified**. Receiving is not required for these outbound notifications. In the domain's configuration, confirm click and open tracking are off. Create a domain-restricted key with **Sending access**, then set `ResendApiKey` and `NotificationFromEmail` in the Static Web App's production backend environment variables. The former `SendGridApiKey` setting is no longer used. Deploy the updated API before testing the website's booking or contact notifications; a Resend dashboard test alone does not exercise this code.
 
-For production routing, save each practitioner's `NotificationEmail` and `NotificationPhone` in the private `Practitioners` columns, and clear **both** test override settings. Null/unconfigured recipients leave a pending notification rather than guessing a destination. Leslie still needs her services, hours, and location configured before accepting new requests.
+For production routing, save each practitioner's `NotificationEmail` and `NotificationPhone` in the private `Practitioners` columns, and clear **both** test override settings. For email-only testing, set only `NotificationTestEmail`; SMS stays pending. Null/unconfigured recipients leave a pending notification rather than guessing a destination. Leslie still needs her services, hours, and location configured before accepting new requests.
 
 ### Backup practitioner login
 

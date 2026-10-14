@@ -101,7 +101,7 @@ public class NotificationSenderTests
     [InlineData("ResendApiKey", "", "EmailNotConfigured")]
     [InlineData("BookingSiteUrl", "http://example.com", "ReviewLinkNotConfigured")]
     [InlineData("BookingSiteUrl", "https://example.com/path", "ReviewLinkNotConfigured")]
-    [InlineData("NotificationTestEmail", "tester@example.com", "IncompleteTestRecipients")]
+    [InlineData("NotificationTestPhone", "+15551234567", "IncompleteTestRecipients")]
     [InlineData("BookingReviewSigningKey", "different-long-signing-key-for-this-test", "SigningKeyChanged")]
     public async Task InvalidConfigurationNeverSends(string key, string value, string expected)
     {
@@ -137,7 +137,7 @@ public class NotificationSenderTests
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var root = json.RootElement;
             Assert.Equal("practice@example.com", root.GetProperty("to")[0].GetString());
-            Assert.Equal("Return to Self Reiki <sender@example.com>", root.GetProperty("from").GetString());
+            Assert.Equal("Entwined & Unwind <sender@example.com>", root.GetProperty("from").GetString());
             Assert.Equal("client@example.com", root.GetProperty("reply_to").GetString());
             Assert.Equal("Contact subject", root.GetProperty("subject").GetString());
             Assert.Equal("Contact text", root.GetProperty("text").GetString());
@@ -164,6 +164,28 @@ public class NotificationSenderTests
         }));
         var notification = new NotificationMessage("Sms", "+15559999999", "Contact subject", "Private message", "Contact alert");
         Assert.Equal("Accepted", (await new NotificationSender(http, configuration).SendAsync(notification, default)).State);
+    }
+
+    [Fact]
+    public async Task EmailOnlyTestingSendsToTesterAndPausesSms()
+    {
+        var configuration = Config();
+        configuration["NotificationTestEmail"] = "tester@example.com";
+        var calls = 0;
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            calls++;
+            Assert.Equal("api.resend.com", request.RequestUri!.Host);
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            Assert.Equal("tester@example.com", json.RootElement.GetProperty("to")[0].GetString());
+            return new(HttpStatusCode.OK) { Content = new StringContent("{\"id\":\"test-email\"}") };
+        }));
+        var sender = new NotificationSender(http, configuration);
+        Assert.Equal("Accepted", (await sender.SendAsync(Notification("Email"), default)).State);
+        var sms = await sender.SendAsync(Notification("Sms") with { Recipient = "+15559999999" }, default);
+        Assert.Equal("Pending", sms.State);
+        Assert.Equal("IncompleteTestRecipients", sms.Error);
+        Assert.Equal(1, calls);
     }
 
     private static BookingNotification Notification(string channel)

@@ -24,7 +24,7 @@ public static class ContactMessage
     }
 
     public static NotificationMessage Notification(ContactNotification notification, string? recipient) => new(
-        notification.Channel, recipient, "New contact message for Return to Self Reiki",
+        notification.Channel, recipient, "New contact message for Entwined & Unwind",
         $"Name: {notification.Contact.Name}\nEmail: {notification.Contact.Email}\nPhone: {notification.Contact.Phone ?? "Not provided"}\nReference: {notification.RequestId:D}\n\n{notification.Contact.Message}",
         $"Return to Self Reiki: New contact message received (ref {notification.RequestId.ToString("N")[..8]}). Check email for details. Reply STOP to unsubscribe.",
         notification.Contact.Email);
