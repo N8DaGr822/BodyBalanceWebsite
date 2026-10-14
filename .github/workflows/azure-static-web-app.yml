@@ -24,8 +24,19 @@ jobs:
       # Configure before publishing so precompressed settings contain the same API address.
       - name: Configure same-origin API
         shell: pwsh
+        env:
+          GOOGLE_AUTH_ENABLED: ${{ vars.BODYBALANCE_GOOGLE_AUTH_ENABLED }}
         run: |
-          '{ "ScheduleApiBaseUrl": "/api" }' | Set-Content BodyBalanceWebsite/wwwroot/appsettings.json
+          $googleEnabled = $env:GOOGLE_AUTH_ENABLED -eq 'true'
+          @{ ScheduleApiBaseUrl = '/api'; GoogleAuthenticationEnabled = $googleEnabled } |
+            ConvertTo-Json | Set-Content BodyBalanceWebsite/wwwroot/appsettings.json
+          # Enable custom providers only after the Standard plan and both OAuth registrations are ready.
+          if ($googleEnabled) {
+            $config = Get-Content BodyBalanceWebsite/wwwroot/staticwebapp.config.json -Raw | ConvertFrom-Json
+            $auth = Get-Content deployment/google-github-auth.json -Raw | ConvertFrom-Json
+            $config | Add-Member -NotePropertyName auth -NotePropertyValue $auth
+            $config | ConvertTo-Json -Depth 20 | Set-Content BodyBalanceWebsite/wwwroot/staticwebapp.config.json
+          }
       - name: Publish website
         run: dotnet publish BodyBalanceWebsite/BodyBalanceWebsite.csproj -c Release -o publish/site
       - name: Publish API

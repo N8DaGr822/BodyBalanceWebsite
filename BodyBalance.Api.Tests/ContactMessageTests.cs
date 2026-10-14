@@ -4,7 +4,34 @@ namespace BodyBalance.Api.Tests;
 
 public class ContactMessageTests
 {
-    private static ContactRequest Request() => new(Guid.NewGuid(), "Test Client", "client@example.com", null, "I'd like more information.");
+    private static ContactRequest Request() => new(Guid.NewGuid(), "Test Client", "client@example.com", null, "I'd like more information.", 1);
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void RequiresASelectedPractitioner(int? practitionerId) =>
+        Assert.Throws<BookingException>(() => ContactMessage.Validate(Request() with { PractitionerId = practitionerId }));
+
+    [Theory]
+    [InlineData(1, "mary@example.com")]
+    [InlineData(2, "leslie@example.com")]
+    public void SelectedPractitionerReceivesTheMessageInsteadOfTheSharedInbox(int practitionerId, string email)
+    {
+        var contact = Request() with { PractitionerId = practitionerId };
+        var notification = new ContactNotification(contact.RequestId, "Email", Guid.NewGuid(), 1, contact, email);
+        Assert.Equal(email, ContactMessage.Recipient(notification, "shared@example.com"));
+        Assert.Null(ContactMessage.Recipient(notification with { PractitionerEmail = null }, "shared@example.com"));
+        Assert.Null(ContactMessage.Recipient(notification with { Channel = "Sms" }, "+15551234567"));
+    }
+
+    [Fact]
+    public void LegacyMessagesRetainTheirSharedDestination()
+    {
+        var contact = Request() with { PractitionerId = null };
+        var notification = new ContactNotification(contact.RequestId, "Email", Guid.NewGuid(), 1, contact);
+        Assert.Equal("shared@example.com", ContactMessage.Recipient(notification, "shared@example.com"));
+    }
 
     [Fact]
     public void NormalizesContactDetailsWithoutChangingTheRetryReference()

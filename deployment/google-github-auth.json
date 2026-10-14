@@ -1,0 +1,16 @@
+{
+  "identityProviders": {
+    "google": {
+      "registration": {
+        "clientIdSettingName": "AUTH_GOOGLE_CLIENT_ID",
+        "clientSecretSettingName": "AUTH_GOOGLE_CLIENT_SECRET"
+      }
+    },
+    "github": {
+      "registration": {
+        "clientIdSettingName": "AUTH_GITHUB_CLIENT_ID",
+        "clientSecretSettingName": "AUTH_GITHUB_CLIENT_SECRET"
+      }
+    }
+  }
+}

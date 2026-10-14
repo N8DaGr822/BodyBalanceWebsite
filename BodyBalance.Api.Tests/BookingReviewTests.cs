@@ -73,6 +73,20 @@ public class BookingReviewTests
     public void MissingOrMalformedPrincipalFailsClosed(string? value) => Assert.Null(PractitionerAccess.ReadIdentity(value));
 
     [Fact]
+    public void GoogleAccountsRequireTheirOwnExplicitPractitionerAssignment()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            { ["PractitionerAccess:google:mary123"] = "1", ["PractitionerAccess:google:leslie123"] = "2" }).Build();
+        var identity = new PractitionerIdentity("google", "mary123", "mary@example.com", ["authenticated"]);
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(identity)));
+        Assert.NotNull(PractitionerAccess.ReadIdentity(encoded));
+        Assert.Equal([1], PractitionerAccess.AllowedPractitioners(identity, configuration));
+        Assert.Equal([2], PractitionerAccess.AllowedPractitioners(identity with { UserId = "leslie123" }, configuration));
+        Assert.Empty(PractitionerAccess.AllowedPractitioners(identity with { UserId = "unassigned" }, configuration));
+        Assert.Empty(PractitionerAccess.AllowedPractitioners(identity with { IdentityProvider = "github" }, configuration));
+    }
+
+    [Fact]
     public void AccountAccessUsesTheVerifiedProviderAndUserIdNotTheDisplayEmail()
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

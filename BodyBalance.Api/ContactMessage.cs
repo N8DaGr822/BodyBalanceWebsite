@@ -2,9 +2,10 @@ using System.ComponentModel.DataAnnotations;
 
 namespace BodyBalance.Api;
 
-public sealed record ContactRequest(Guid RequestId, string? Name, string? Email, string? Phone, string? Message);
+public sealed record ContactRequest(Guid RequestId, string? Name, string? Email, string? Phone, string? Message, int? PractitionerId = null);
 public sealed record ContactReceipt(Guid RequestId);
-public sealed record ContactNotification(Guid RequestId, string Channel, Guid ClaimId, int Attempts, ContactRequest Contact);
+public sealed record ContactNotification(Guid RequestId, string Channel, Guid ClaimId, int Attempts, ContactRequest Contact,
+    string? PractitionerEmail = null, string? PractitionerPhone = null);
 
 public static class ContactMessage
 {
@@ -15,6 +16,7 @@ public static class ContactMessage
         var phone = request.Phone?.Trim();
         var message = request.Message?.Trim();
         if (request.RequestId == Guid.Empty) throw new BookingException("Refresh the page before sending your message.");
+        if (request.PractitionerId is null or <= 0) throw new BookingException("Choose the practitioner you would like to contact.");
         if (string.IsNullOrWhiteSpace(name) || name.Length > 150) throw new BookingException("Enter your name (up to 150 characters).");
         if (string.IsNullOrWhiteSpace(email) || email.Length > 254 || !new EmailAddressAttribute().IsValid(email))
             throw new BookingException("Enter a valid email address (up to 254 characters).");
@@ -22,6 +24,11 @@ public static class ContactMessage
         if (string.IsNullOrWhiteSpace(message) || message.Length > 4000) throw new BookingException("Enter your message (up to 4,000 characters).");
         return request with { Name = name, Email = email, Phone = string.IsNullOrEmpty(phone) ? null : phone, Message = message };
     }
+
+    // Recipient Privacy: A selected practitioner's missing destination must never fall back to another inbox.
+    public static string? Recipient(ContactNotification notification, string? sharedRecipient) =>
+        notification.Contact.PractitionerId is null ? sharedRecipient
+            : notification.Channel == "Email" ? notification.PractitionerEmail : notification.PractitionerPhone;
 
     public static NotificationMessage Notification(ContactNotification notification, string? recipient) => new(
         notification.Channel, recipient, "New contact message for Entwined & Unwind",

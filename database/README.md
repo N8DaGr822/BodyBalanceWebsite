@@ -84,7 +84,9 @@ The version 3 migration and SQL concurrency scenarios require validation against
 
 Run `004_contact_messages.sql` after version 3, then `configure_api_contact_access.sql` as the database administrator. The migration is transactional and repeat-safe. It adds `ContactMessages` (name, email, optional phone, message, creation time and unique request reference) and `ContactNotifications` (one email and one SMS delivery record per message). No existing appointments or practitioner settings change.
 
-The API saves the message and its two notification rows together. A matching GUID retry returns the saved receipt; reusing that GUID with different content fails. New submissions share an application lock for the duplicate check and the practice-wide hourly limit. Contact enquiries never reserve time, require approval, or appear in the appointment inbox. Shared practice recipients and test routing are backend settings documented in `../BodyBalance.Api/README.md`.
+The API saves the message and its two notification rows together. A matching GUID retry returns the saved receipt; reusing that GUID with different content fails. New submissions share an application lock for the duplicate check and the practice-wide hourly limit. Contact enquiries never reserve time, require approval, or appear in the appointment inbox. Recipient routing and test overrides are documented in `../BodyBalance.Api/README.md`.
+
+Apply `005_contact_practitioner.sql` before deploying practitioner-specific contact routing. Version 5 adds nullable `ContactMessages.PractitionerId` with a foreign key. Existing messages remain unassigned and keep their legacy shared destination; new submissions require an active practitioner, and GUID replay also compares that choice. New messages use that practitioner's private notification destinations without falling back to the shared inbox. The existing table-level contact grants cover the new column; no additional permissions or backfill are required.
 
 Monitor privately, using the same provider-reconciliation rules as booking notifications:
 

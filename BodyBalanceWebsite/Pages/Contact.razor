@@ -37,8 +37,18 @@
                     <EditForm Model="model" OnValidSubmit="Submit" class="booking-form">
                         <DataAnnotationsValidator />
                         <ValidationSummary />
-                        <fieldset disabled="@(submitting || retryPending)">
+                        <fieldset disabled="@(submitting || retryPending || loadingPractitioners || practitioners.Length == 0)">
                             <legend>Send us a message</legend>
+                            <div class="calendar-practitioner">
+                                <label for="contact-practitioner">Who would you like to contact?</label>
+                                <InputSelect id="contact-practitioner" @bind-Value="model.PractitionerId">
+                                    <option value="">Choose Mary or Leslie</option>
+                                    @foreach (var person in practitioners)
+                                    {
+                                        <option value="@person.PractitionerId">@person.DisplayName</option>
+                                    }
+                                </InputSelect>
+                            </div>
                             <div class="contact-form">
                                 <div>
                                     <label for="name">Name</label>
@@ -58,11 +68,17 @@
                                 </div>
                             </div>
                         </fieldset>
+                        @if (loadingPractitioners) { <p role="status">Loading practitioners...</p> }
+                        @if (practitionerLoadFailed)
+                        {
+                            <p class="calendar-notice" role="alert">We couldn't load the practitioners. Please try again.</p>
+                            <button type="button" class="btn btn-cream" @onclick="LoadPractitionersAsync">Retry loading practitioners</button>
+                        }
                         @if (!string.IsNullOrEmpty(error))
                         {
                             <p class="calendar-notice" role="alert">@error</p>
                         }
-                        <button type="submit" class="btn btn-navy" disabled="@(submitting || string.IsNullOrWhiteSpace(apiBaseUrl))">
+                        <button type="submit" class="btn btn-navy" disabled="@(submitting || loadingPractitioners || practitioners.Length == 0 || string.IsNullOrWhiteSpace(apiBaseUrl))">
                             @(submitting ? "Sending..." : retryPending ? "Retry this message" : "Send Message")
                             <svg viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
                         </button>
@@ -115,8 +131,38 @@
     private bool submitting;
     private bool retryPending;
     private bool disposed;
+    private Practitioner[] practitioners = [];
+    private bool loadingPractitioners;
+    private bool practitionerLoadFailed;
 
-    protected override void OnInitialized() => apiBaseUrl = Configuration["ScheduleApiBaseUrl"];
+    protected override async Task OnInitializedAsync()
+    {
+        apiBaseUrl = Configuration["ScheduleApiBaseUrl"];
+        if (!string.IsNullOrWhiteSpace(apiBaseUrl)) await LoadPractitionersAsync();
+    }
+
+    private async Task LoadPractitionersAsync()
+    {
+        if (loadingPractitioners) return;
+        loadingPractitioners = true;
+        practitionerLoadFailed = false;
+        try
+        {
+            var result = await Http.GetFromJsonAsync<Practitioner[]>($"{apiBaseUrl!.TrimEnd('/')}/practitioners", cancellation.Token)
+                ?? throw new JsonException("Missing practitioners.");
+            if (!disposed)
+            {
+                practitioners = result;
+                practitionerLoadFailed = result.Length == 0;
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed) practitionerLoadFailed = true;
+        }
+        finally { loadingPractitioners = false; }
+    }
 
     private async Task Submit()
     {
@@ -126,7 +172,7 @@
         try
         {
             using var response = await Http.PostAsJsonAsync($"{apiBaseUrl.TrimEnd('/')}/contact-messages",
-                new { requestId, model.Name, model.Email, model.Phone, model.Message }, cancellation.Token);
+                new { requestId, model.Name, model.Email, model.Phone, model.Message, model.PractitionerId }, cancellation.Token);
             if (disposed) return;
             if (response.IsSuccessStatusCode)
             {
@@ -162,11 +208,14 @@
 
     private sealed class ContactDetails
     {
+        [Required(ErrorMessage = "Choose the practitioner you would like to contact.")]
+        public int? PractitionerId { get; set; }
         [Required, StringLength(150)] public string Name { get; set; } = "";
         [Required, EmailAddress, StringLength(254)] public string Email { get; set; } = "";
         [StringLength(30)] public string? Phone { get; set; }
         [Required, StringLength(4000)] public string Message { get; set; } = "";
     }
     private sealed record ContactReceipt(Guid RequestId);
+    private sealed record Practitioner(int PractitionerId, string DisplayName);
     private sealed record ApiError(string Error);
 }

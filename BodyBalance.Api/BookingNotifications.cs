@@ -31,7 +31,8 @@ public sealed class BookingNotifications(ScheduleData data, NotificationSender s
         {
             var notification = await data.ClaimContactNotificationAsync(requestId, cancellationToken);
             if (notification is null) break;
-            var recipient = configuration[notification.Channel == "Email" ? "ContactRecipientEmail" : "ContactRecipientPhone"];
+            var recipient = ContactMessage.Recipient(notification,
+                configuration[notification.Channel == "Email" ? "ContactRecipientEmail" : "ContactRecipientPhone"]);
             var result = await sender.SendAsync(ContactMessage.Notification(notification, recipient), cancellationToken);
             await data.FinishContactNotificationAsync(notification, result, cancellationToken);
             if (result.State != "Accepted")

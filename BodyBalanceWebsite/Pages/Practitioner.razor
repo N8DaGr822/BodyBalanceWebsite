@@ -26,7 +26,14 @@
     {
         <p>Sign in with the account your administrator authorized for practitioner access.</p>
         <div class="calendar-navigation">
-            <button class="btn btn-navy" @onclick='() => SignIn("aad")'>Sign in with Microsoft</button>
+            @if (Configuration.GetValue<bool>("GoogleAuthenticationEnabled"))
+            {
+                <button class="btn btn-navy" @onclick='() => SignIn("google")'>Sign in with Google</button>
+            }
+            else
+            {
+                <button class="btn btn-navy" @onclick='() => SignIn("aad")'>Sign in with Microsoft</button>
+            }
             <button class="btn btn-cream" @onclick='() => SignIn("github")'>Sign in with GitHub</button>
         </div>
     }

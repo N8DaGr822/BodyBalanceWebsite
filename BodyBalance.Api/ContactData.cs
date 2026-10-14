@@ -22,7 +22,7 @@ public sealed partial class ScheduleData
         }
         // Retry Safety: A lost response cannot create another message or another pair of notifications.
         using (var command = new SqlCommand("""
-            SELECT CustomerName, CustomerEmail, CustomerPhone, Message FROM dbo.ContactMessages WHERE RequestId = @id;
+            SELECT CustomerName, CustomerEmail, CustomerPhone, Message, PractitionerId FROM dbo.ContactMessages WHERE RequestId = @id;
             """, connection, transaction))
         {
             command.Parameters.Add("@id", SqlDbType.UniqueIdentifier).Value = request.RequestId;
@@ -30,11 +30,14 @@ public sealed partial class ScheduleData
             if (await reader.ReadAsync(cancellationToken))
             {
                 if (reader.GetString(0) != request.Name || reader.GetString(1) != request.Email
-                    || (reader.IsDBNull(2) ? null : reader.GetString(2)) != request.Phone || reader.GetString(3) != request.Message)
+                    || (reader.IsDBNull(2) ? null : reader.GetString(2)) != request.Phone || reader.GetString(3) != request.Message
+                    || (reader.IsDBNull(4) ? (int?)null : reader.GetInt32(4)) != request.PractitionerId)
                     throw new BookingException("This message reference was already used. Refresh before sending another message.", true);
                 return new(request.RequestId);
             }
         }
+        if (!(await GetPractitionersAsync(connection, transaction, cancellationToken)).Any(p => p.PractitionerId == request.PractitionerId))
+            throw new BookingException("Choose an available practitioner to contact.");
         var limit = int.TryParse(configuration["ContactMessagesPerHour"], out var configuredLimit) && configuredLimit > 0 ? configuredLimit : 20;
         using (var command = new SqlCommand("SELECT COUNT(*) FROM dbo.ContactMessages WHERE CreatedAtUtc >= DATEADD(hour, -1, SYSUTCDATETIME());", connection, transaction))
         {
@@ -42,8 +45,8 @@ public sealed partial class ScheduleData
                 throw new BookingException("Online messages are temporarily at capacity. Please try again later.");
         }
         using (var command = new SqlCommand("""
-            INSERT dbo.ContactMessages (RequestId, CustomerName, CustomerEmail, CustomerPhone, Message)
-            VALUES (@id, @name, @email, @phone, @message);
+            INSERT dbo.ContactMessages (RequestId, CustomerName, CustomerEmail, CustomerPhone, Message, PractitionerId)
+            VALUES (@id, @name, @email, @phone, @message, @practitionerId);
             INSERT dbo.ContactNotifications (RequestId, Channel) VALUES (@id, 'Email'), (@id, 'Sms');
             """, connection, transaction))
         {
@@ -52,6 +55,7 @@ public sealed partial class ScheduleData
             command.Parameters.Add("@email", SqlDbType.NVarChar, 254).Value = request.Email!;
             command.Parameters.Add("@phone", SqlDbType.NVarChar, 30).Value = (object?)request.Phone ?? DBNull.Value;
             command.Parameters.Add("@message", SqlDbType.NVarChar, 4000).Value = request.Message!;
+            command.Parameters.Add("@practitionerId", SqlDbType.Int).Value = request.PractitionerId!.Value;
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
@@ -86,12 +90,18 @@ public sealed partial class ScheduleData
             claimId = reader.GetGuid(2);
             attempts = reader.GetInt32(3);
         }
-        using var details = new SqlCommand("SELECT CustomerName, CustomerEmail, CustomerPhone, Message FROM dbo.ContactMessages WHERE RequestId = @id;", connection);
+        using var details = new SqlCommand("""
+            SELECT c.CustomerName, c.CustomerEmail, c.CustomerPhone, c.Message, c.PractitionerId,
+                p.NotificationEmail, p.NotificationPhone
+            FROM dbo.ContactMessages c LEFT JOIN dbo.Practitioners p ON p.PractitionerId = c.PractitionerId
+            WHERE c.RequestId = @id;
+            """, connection);
         details.Parameters.Add("@id", SqlDbType.UniqueIdentifier).Value = id;
         await using var result = await details.ExecuteReaderAsync(cancellationToken);
         if (!await result.ReadAsync(cancellationToken)) return null;
         return new(id, channel, claimId, attempts, new(id, result.GetString(0), result.GetString(1),
-            result.IsDBNull(2) ? null : result.GetString(2), result.GetString(3)));
+            result.IsDBNull(2) ? null : result.GetString(2), result.GetString(3), result.IsDBNull(4) ? null : result.GetInt32(4)),
+            result.IsDBNull(5) ? null : result.GetString(5), result.IsDBNull(6) ? null : result.GetString(6));
     }
 
     public async Task FinishContactNotificationAsync(ContactNotification notification, NotificationResult result, CancellationToken cancellationToken)

@@ -15,7 +15,7 @@ public static class PractitionerAccess
         {
             var identity = JsonSerializer.Deserialize<PractitionerIdentity>(Convert.FromBase64String(encodedPrincipal),
                 new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            return identity is { IdentityProvider: "aad" or "github", UserId.Length: > 0 and <= 128 }
+            return identity is { IdentityProvider: "aad" or "github" or "google", UserId.Length: > 0 and <= 128 }
                 && identity.UserId.All(c => char.IsAsciiLetterOrDigit(c) || c == '-')
                 && identity.UserRoles?.Contains("authenticated", StringComparer.Ordinal) == true ? identity : null;
         }
