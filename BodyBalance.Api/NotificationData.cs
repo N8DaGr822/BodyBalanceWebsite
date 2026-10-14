@@ -17,7 +17,8 @@ public sealed partial class ScheduleData
             (
                 SELECT TOP (1) n.* FROM dbo.BookingNotifications n WITH (UPDLOCK, READPAST, READCOMMITTEDLOCK)
                 JOIN dbo.Appointments a ON a.AppointmentId = n.AppointmentId
-                WHERE n.State = 'Pending' AND n.Attempts < 5 AND n.NextAttemptAtUtc <= SYSUTCDATETIME()
+                -- Dispatch Timing: Match datetime2(0) rounding so newly inserted notifications are immediately eligible.
+                WHERE n.State = 'Pending' AND n.Attempts < 5 AND n.NextAttemptAtUtc <= CAST(SYSUTCDATETIME() AS datetime2(0))
                     AND a.Status = 'Requested' AND a.ReviewExpiresAtUtc > SYSUTCDATETIME()
                     AND (@requestId IS NULL OR a.BookingRequestId = @requestId)
                 ORDER BY n.NextAttemptAtUtc, n.AppointmentId, n.Channel

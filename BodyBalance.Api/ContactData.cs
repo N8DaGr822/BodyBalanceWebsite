@@ -65,7 +65,8 @@ public sealed partial class ScheduleData
             ;WITH candidate AS
             (
                 SELECT TOP (1) * FROM dbo.ContactNotifications WITH (UPDLOCK, READPAST, READCOMMITTEDLOCK)
-                WHERE State = 'Pending' AND Attempts < 5 AND NextAttemptAtUtc <= SYSUTCDATETIME()
+                -- Dispatch Timing: Match datetime2(0) rounding so newly inserted notifications are immediately eligible.
+                WHERE State = 'Pending' AND Attempts < 5 AND NextAttemptAtUtc <= CAST(SYSUTCDATETIME() AS datetime2(0))
                     AND (@id IS NULL OR RequestId = @id)
                 ORDER BY NextAttemptAtUtc, RequestId, Channel
             )
