@@ -2,12 +2,6 @@
     margin-bottom: 2rem;
 }
 
-summary {
-    cursor: pointer;
-    font-weight: 600;
-    padding: 1rem 0;
-}
-
 fieldset {
     border: 1px solid var(--navy);
     border-radius: .5rem;
@@ -33,6 +27,17 @@ legend {
     display: inline-block;
     min-width: 9rem;
     font-weight: 600;
+}
+
+.working-day {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .75rem;
+}
+
+.working-day > .btn {
+    font-size: .85rem;
 }
 
 .working-period, .time-off-entry {

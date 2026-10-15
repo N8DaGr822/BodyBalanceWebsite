@@ -53,6 +53,19 @@ public sealed partial class ScheduleData
             var existing = await ReadWorkingHoursAsync(id, today, connection, transaction, cancellationToken);
             if (hours.Version != PractitionerAvailability.Version(existing))
                 throw new BookingException("Working hours changed since you opened this screen. Refresh availability before saving.", true);
+            if (hours.StartDate is not null || hours.EndDate is not null)
+            {
+                rules = PractitionerAvailability.ReplaceDateRange(existing, hours, today);
+                using var addedHours = new SqlCommand("""
+                    SELECT COUNT(*) FROM dbo.AvailabilityExceptions
+                    WHERE PractitionerId = @id AND Kind = 'Added' AND StartAtUtc < @end AND EndAtUtc > @start;
+                    """, connection, transaction);
+                addedHours.Parameters.Add("@id", SqlDbType.Int).Value = id;
+                addedHours.Parameters.Add("@start", SqlDbType.DateTime2).Value = Availability.ToUtc(hours.StartDate!.Value, zone);
+                addedHours.Parameters.Add("@end", SqlDbType.DateTime2).Value = Availability.ToUtc(hours.EndDate!.Value.AddDays(1), zone);
+                if (Convert.ToInt32(await addedHours.ExecuteScalarAsync(cancellationToken)) != 0)
+                    throw new BookingException("These dates include separately added availability. Ask your administrator to reconcile those added hours before editing this week.");
+            }
             // Weekly History: End previous rules yesterday; only replace today's and future recurring hours.
             using (var command = new SqlCommand("""
                 DELETE FROM dbo.AvailabilityRules WHERE PractitionerId = @id AND EffectiveFrom >= @today;
@@ -67,14 +80,15 @@ public sealed partial class ScheduleData
             foreach (var rule in rules)
             {
                 using var command = new SqlCommand("""
-                    INSERT dbo.AvailabilityRules(PractitionerId, DayOfWeek, StartTimeLocal, EndTimeLocal, EffectiveFrom)
-                    VALUES (@id, @day, @start, @end, @today);
+                    INSERT dbo.AvailabilityRules(PractitionerId, DayOfWeek, StartTimeLocal, EndTimeLocal, EffectiveFrom, EffectiveThrough)
+                    VALUES (@id, @day, @start, @end, @from, @through);
                     """, connection, transaction);
                 command.Parameters.Add("@id", SqlDbType.Int).Value = id;
                 command.Parameters.Add("@day", SqlDbType.TinyInt).Value = rule.DayOfWeek;
                 command.Parameters.Add("@start", SqlDbType.Time).Value = rule.StartTimeLocal;
                 command.Parameters.Add("@end", SqlDbType.Time).Value = rule.EndTimeLocal;
-                command.Parameters.Add("@today", SqlDbType.Date).Value = today;
+                command.Parameters.Add("@from", SqlDbType.Date).Value = rule.EffectiveFrom;
+                command.Parameters.Add("@through", SqlDbType.Date).Value = (object?)rule.EffectiveThrough ?? DBNull.Value;
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
         }

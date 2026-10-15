@@ -52,7 +52,7 @@
             <p><a class="btn btn-navy" href="admin/messages">Open shared inbox</a></p>
             <div class="calendar-practitioner">
                 <label for="admin-practitioner">Show appointments for</label>
-                <select id="admin-practitioner" @bind="practitionerId" @bind:after="UpdateCalendar">
+                <select id="admin-practitioner" @bind="practitionerId" @bind:after="RefreshAvailabilityAsync">
                     <option value="0">All authorized practitioners</option>
                     @foreach (var person in inbox.Practitioners)
                     {
@@ -60,14 +60,23 @@
                     }
                 </select>
             </div>
+            <div class="calendar-toolbar">
+                <h2>@week.ToString("MMM d, yyyy") – @week.AddDays(6).ToString("MMM d, yyyy")</h2>
+                <div class="calendar-navigation" role="group" aria-label="Working week navigation">
+                    <button type="button" class="btn btn-navy" disabled="@(week.AddDays(-7).Year < 2000)" @onclick="() => ChangeWeekAsync(-1)">Previous week</button>
+                    <button type="button" class="btn btn-cream" @onclick="ShowCurrentWeekAsync">This week</button>
+                    <button type="button" class="btn btn-navy" disabled="@(week.AddDays(7).Year > 2100)" @onclick="() => ChangeWeekAsync(1)">Next week</button>
+                </div>
+            </div>
+            <p>Save changes before switching practitioners or weeks.</p>
             <h2>Working hours &amp; time off</h2>
             @if (practitionerId != 0)
             {
-                <PractitionerAvailabilityEditor @key="practitionerId" ApiBaseUrl="@apiBaseUrl" PractitionerId="practitionerId" PractitionerName="@PractitionerName(practitionerId)" />
+                <PractitionerAvailabilityEditor @key="(practitionerId, week)" ApiBaseUrl="@apiBaseUrl" PractitionerId="practitionerId" PractitionerName="@PractitionerName(practitionerId)" Week="week" OnSaved="RefreshAvailabilityAsync" />
             }
             else if (inbox.Practitioners.Length == 1)
             {
-                <PractitionerAvailabilityEditor @key="inbox.Practitioners[0].PractitionerId" ApiBaseUrl="@apiBaseUrl" PractitionerId="inbox.Practitioners[0].PractitionerId" PractitionerName="@inbox.Practitioners[0].DisplayName" />
+                <PractitionerAvailabilityEditor @key="(inbox.Practitioners[0].PractitionerId, week)" ApiBaseUrl="@apiBaseUrl" PractitionerId="inbox.Practitioners[0].PractitionerId" PractitionerName="@inbox.Practitioners[0].DisplayName" Week="week" OnSaved="RefreshAvailabilityAsync" />
             }
             else
             {
@@ -98,15 +107,10 @@
                     }
                 }
             }
-            <div class="calendar-toolbar">
-                <h2 id="admin-week" aria-live="polite">@week.ToString("MMM d, yyyy") &ndash; @week.AddDays(6).ToString("MMM d, yyyy")</h2>
-                <div class="calendar-navigation" role="group" aria-label="Weekly calendar navigation">
-                    <button type="button" class="btn btn-navy" disabled="@(week.AddDays(-7).Year < 2000)" @onclick="() => ChangeWeekAsync(-1)">Previous week</button>
-                    <button type="button" class="btn btn-cream" @onclick="ShowCurrentWeekAsync">This week</button>
-                    <button type="button" class="btn btn-navy" disabled="@(week.AddDays(7).Year > 2100)" @onclick="() => ChangeWeekAsync(1)">Next week</button>
-                </div>
-            </div>
-            <p>Reserved appointments are shown in Central Time. Select an appointment to view its details.</p>
+            <h2 id="admin-week">Availability &amp; appointments</h2>
+            <p>Green shows available hours after time off, reservations, and booking notice. Cream shows booked appointments. All times are Central. Select a booked appointment for details.</p>
+            @if (availabilityLoading) { <p role="status">Updating available hours…</p> }
+            @if (availabilityError is not null) { <p class="calendar-notice" role="alert">@availabilityError</p> }
             <div class="calendar-grid" role="region" aria-labelledby="admin-week" tabindex="0">
                 <CalendarContainer @key="(week, appointments)" FirstDate="week" DisplayedView="DisplayedView.Weekly" TasksList="appointments" Draggable="false">
                     <WeekView WeekDaysColor="var(--cream-pale)" SaturdayColor="var(--cream)" SundayColor="var(--cream)"
@@ -147,6 +151,10 @@
     private DateTime week = CurrentWeek();
     private ScheduledAppointment[] scheduled = [];
     private Tasks[] appointments = [];
+    private Tasks[] availableHours = [];
+    private int availabilityVersion;
+    private bool availabilityLoading;
+    private string? availabilityError;
     private static readonly TimeZoneInfo calendarZone = TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
 
     protected override async Task OnInitializedAsync()
@@ -158,6 +166,7 @@
 
     private async Task LoadAsync()
     {
+        availabilityVersion++;
         loading = true;
         inbox = null;
         error = null;
@@ -173,7 +182,7 @@
             {
                 inbox = result;
                 if (!inbox.Practitioners.Any(p => p.PractitionerId == practitionerId)) practitionerId = 0;
-                UpdateCalendar();
+                await RefreshAvailabilityAsync();
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
@@ -192,7 +201,52 @@
             ID = index + 1, DateStart = LocalTime(booking.StartAtUtc), DateEnd = LocalTime(booking.EndAtUtc),
             Caption = $"{booking.CustomerName} · {booking.ServiceName}", Code = $"{PractitionerName(booking.PractitionerId)} · {booking.CustomerName}",
             Color = "#ece2cd", ForeColor = "#22304a", NotBeDraggable = true
-        }).ToArray();
+        }).Concat(availableHours).ToArray();
+    }
+
+    private async Task RefreshAvailabilityAsync()
+    {
+        var version = ++availabilityVersion;
+        availableHours = [];
+        availabilityError = null;
+        availabilityLoading = true;
+        UpdateCalendar();
+        var selected = inbox!.Practitioners.Where(p => practitionerId == 0 || p.PractitionerId == practitionerId).ToArray();
+        var start = week;
+        var end = week.AddDays(7);
+        try
+        {
+            var preview = new List<Tasks>();
+            foreach (var person in selected)
+            {
+                for (var month = new DateTime(start.Year, start.Month, 1); month < end; month = month.AddMonths(1))
+                {
+                    var result = await Http.GetFromJsonAsync<AvailabilityPreview>(
+                        $"{apiBaseUrl!.TrimEnd('/')}/practitioners/{person.PractitionerId}/availability?month={month:yyyy-MM}", cancellation.Token)
+                        ?? throw new JsonException("Missing availability.");
+                    if (disposed || version != availabilityVersion) return;
+                    foreach (var window in result.Windows)
+                    {
+                        var from = LocalTime(window.StartAtUtc);
+                        var through = LocalTime(window.EndAtUtc);
+                        if (from >= end || through <= start) continue;
+                        // Calendar Preview: Negative IDs distinguish availability from clickable booked appointments.
+                        preview.Add(new Tasks { ID = -(preview.Count + 1), DateStart = from < start ? start : from,
+                            DateEnd = through > end ? end : through, Caption = $"{person.DisplayName} · Available",
+                            Code = $"{person.DisplayName} · Available", Color = "#d9eadb", ForeColor = "#183e27", NotBeDraggable = true });
+                    }
+                }
+            }
+            availableHours = preview.ToArray();
+            UpdateCalendar();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed && version == availabilityVersion)
+                availabilityError = "Available hours could not be refreshed. Refresh appointments to try again.";
+        }
+        finally { if (version == availabilityVersion) availabilityLoading = false; }
     }
 
     private void OpenAppointment(ClickTaskParameter args)
@@ -214,6 +268,7 @@
     {
         if (loading || week.AddDays(offset * 7).Year is < 2000 or > 2100) return;
         week = week.AddDays(offset * 7);
+        availabilityVersion++;
         await LoadAsync();
     }
 
@@ -221,6 +276,7 @@
     {
         if (loading) return;
         week = CurrentWeek();
+        availabilityVersion++;
         await LoadAsync();
     }
 
@@ -246,6 +302,8 @@
 
     private sealed record Inbox(string IdentityProvider, string UserId, string UserDetails, Person[] Practitioners, BookingSummary[] Bookings, ScheduledAppointment[] Schedule);
     private sealed record Person(int PractitionerId, string DisplayName);
+    private sealed record AvailabilityPreview(AvailableWindow[] Windows);
+    private sealed record AvailableWindow(DateTimeOffset StartAtUtc, DateTimeOffset EndAtUtc);
     private sealed record BookingSummary(Guid RequestId, int PractitionerId, string CustomerName, string ServiceName,
         DateTimeOffset StartAtUtc, string TimeZoneId, string Status);
     private sealed record ScheduledAppointment(Guid? RequestId, int PractitionerId, string CustomerName, string ServiceName,

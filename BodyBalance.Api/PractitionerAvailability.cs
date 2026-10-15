@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace BodyBalance.Api;
 
 public sealed record WorkingPeriod(int DayOfWeek, string Start, string End);
-public sealed record WeeklyHoursChange(string? Version, WorkingPeriod[]? Hours);
+public sealed record WeeklyHoursChange(string? Version, WorkingPeriod[]? Hours, DateTime? StartDate = null, DateTime? EndDate = null);
 public sealed record TimeOffChange(DateTime StartDate, DateTime EndDate, bool AllDay, string? StartTime, string? EndTime);
 public sealed record TimeOffEntry(int Id, DateTime StartAtUtc, DateTime EndAtUtc);
 public sealed record AvailabilitySettings(string TimeZoneId, DateTime Today, string Version, WeeklyHours[] Rules, TimeOffEntry[] TimeOff);
@@ -55,6 +55,35 @@ public static class PractitionerAvailability
         if (zone.IsInvalidTime(start) || zone.IsInvalidTime(end) || zone.IsAmbiguousTime(start) || zone.IsAmbiguousTime(end))
             throw new BookingException("Choose times outside the daylight-saving clock change.");
         return new(Availability.ToUtc(start, zone), Availability.ToUtc(end, zone));
+    }
+
+    public static WeeklyHours[] ReplaceDateRange(WeeklyHours[] existing, WeeklyHoursChange change, DateTime today)
+    {
+        if (change.StartDate is not { } start || change.EndDate is not { } end
+            || start.TimeOfDay != TimeSpan.Zero || end.TimeOfDay != TimeSpan.Zero
+            || start < today || end < start || (end - start).Days > 6 || end.Year > 2100)
+            throw new BookingException("Choose up to seven dates starting today or later (through 2100).");
+        var replacements = ValidateHours(change.Hours, start);
+        var dates = Enumerable.Range(0, (end - start).Days + 1).Select(offset => (int)start.AddDays(offset).DayOfWeek).ToHashSet();
+        if (replacements.Any(rule => !dates.Contains(rule.DayOfWeek)))
+            throw new BookingException("Working hours must belong to the selected dates.");
+
+        // Dated Hours: Split existing rules around this week so other weeks retain their original hours.
+        var result = new List<WeeklyHours>();
+        foreach (var rule in existing)
+        {
+            var from = rule.EffectiveFrom < today ? today : rule.EffectiveFrom;
+            if (from < start)
+            {
+                var through = rule.EffectiveThrough is { } last && last < start ? last : start.AddDays(-1);
+                if (from <= through) result.Add(rule with { EffectiveFrom = from, EffectiveThrough = through });
+            }
+            var after = from > end ? from : end.AddDays(1);
+            if (rule.EffectiveThrough is null || after <= rule.EffectiveThrough)
+                result.Add(rule with { EffectiveFrom = after });
+        }
+        result.AddRange(replacements.Select(rule => rule with { EffectiveThrough = end }));
+        return result.ToArray();
     }
 
     // Blazor Time Inputs: Change events append zero seconds even when the control edits only hours and minutes.

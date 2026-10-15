@@ -3,8 +3,8 @@
 @implements IDisposable
 @inject HttpClient Http
 
-<details class="availability-editor">
-    <summary>Manage availability for @PractitionerName</summary>
+<section class="availability-editor" aria-label="Working hours for @PractitionerName">
+    <h3>@PractitionerName's hours</h3>
     @if (loading)
     {
         <p role="status">Loading availability...</p>
@@ -13,25 +13,19 @@
     @if (!string.IsNullOrEmpty(message)) { <p class="calendar-notice" role="status">@message</p> }
     @if (settings is not null)
     {
-        <p>All dates and times use @settings.TimeZoneId.</p>
+        <p>Times are in Central Time. Changes apply only to the dates shown.</p>
         <fieldset disabled="@(busy || loading || needsRefresh)">
-            <legend>Weekly working hours</legend>
-            <p>Check the days you work. Saving replaces recurring hours from @settings.Today.ToString("MMM d, yyyy") onward. Existing appointments, time off, and separately added availability stay in place.</p>
-            @if (settings.Rules.Any(r => r.EffectiveFrom > settings.Today || r.EffectiveThrough is not null))
-            {
-                <p class="calendar-notice">Your schedule includes dated rules. The form shows today's rules; saving replaces future recurring rules too.</p>
-                <ul>
-                    @foreach (var rule in settings.Rules)
-                    {
-                        <li>@((DayOfWeek)rule.DayOfWeek): @FormatTime(rule.StartTimeLocal) – @FormatTime(rule.EndTimeLocal), @rule.EffectiveFrom.ToString("MMM d, yyyy") through @(rule.EffectiveThrough?.ToString("MMM d, yyyy") ?? "ongoing")</li>
-                    }
-                </ul>
-            }
+            <legend>@Week.ToString("MMM d") – @Week.AddDays(6).ToString("MMM d, yyyy")</legend>
+            <p>Check each working day and set its hours. Uncheck a day to take it off. Existing appointments stay booked.</p>
             @foreach (var day in days)
             {
                 <div class="working-day">
-                    <label><input type="checkbox" @bind="day.Enabled" /> @((DayOfWeek)day.Day)</label>
-                    @if (day.Enabled)
+                    <label><input type="checkbox" @bind="day.Enabled" disabled="@(day.Date < settings.Today)" /> @day.Date.ToString("ddd, MMM d")</label>
+                    @if (day.Date < settings.Today)
+                    {
+                        <span>Past date</span>
+                    }
+                    else if (day.Enabled)
                     {
                         @foreach (var period in day.Periods)
                         {
@@ -40,23 +34,23 @@
                                 <label>End <input type="time" value="@period.End" @onchange="e => period.End = e.Value?.ToString() ?? string.Empty" /></label>
                                 @if (day.Periods.Count > 1)
                                 {
-                                    <button type="button" class="btn btn-cream" @onclick="() => day.Periods.Remove(period)">Remove period</button>
+                                    <button type="button" class="btn btn-cream" @onclick="() => day.Periods.Remove(period)">Remove</button>
                                 }
                             </div>
                         }
                         @if (day.Periods.Count < 3)
                         {
-                            <button type="button" class="btn btn-cream" @onclick='() => day.Periods.Add(new Period { Start = "13:00", End = "17:00" })'>Add working period</button>
+                            <button type="button" class="btn btn-cream" @onclick='() => day.Periods.Add(new Period { Start = "13:00", End = "17:00" })'>Add split shift</button>
                         }
                     }
-                    else { <span>Not working</span> }
+                    else { <span>Day off</span> }
                 </div>
             }
-            <button type="button" class="btn btn-navy" @onclick="SaveHoursAsync">Save weekly hours</button>
+            <button type="button" class="btn btn-navy" disabled="@(Week.AddDays(6) < settings.Today || Week.AddDays(6).Year > 2100)" @onclick="SaveHoursAsync">@(busy ? "Saving…" : "Save these dates")</button>
         </fieldset>
         <fieldset disabled="@(busy || loading || needsRefresh)">
             <legend>Time off</legend>
-            <p>Block a whole day, a date range, or specific hours. Time off cannot overlap a confirmed appointment. Pending requests remain for review, but blocked times cannot be approved.</p>
+            <p>For holidays or breaks, block dates or part of a day. Existing time off overrides the hours above. Confirmed appointments must be handled first.</p>
             <div class="working-period">
                 <label>First day <input type="date" @bind="startDate" min="@settings.Today.ToString("yyyy-MM-dd")" max="2100-12-31" /></label>
                 <label>Last day <input type="date" @bind="endDate" min="@settings.Today.ToString("yyyy-MM-dd")" max="2100-12-31" /></label>
@@ -75,7 +69,7 @@
             @foreach (var entry in settings.TimeOff)
             {
                 <div class="time-off-entry" @key="entry.Id">
-                    <span>@LocalTime(entry.StartAtUtc).ToString("MMM d, yyyy h:mm tt") – @LocalTime(entry.EndAtUtc).ToString("MMM d, yyyy h:mm tt")</span>
+                    <span>@FormatTimeOff(entry)</span>
                     @if (removeId == entry.Id)
                     {
                         <span>Remove this time off and reopen these hours?</span>
@@ -91,12 +85,14 @@
         </fieldset>
     }
     <button type="button" class="btn btn-cream" disabled="@(busy || loading)" @onclick="RefreshAsync">Refresh availability (discard edits)</button>
-</details>
+</section>
 
 @code {
     [Parameter, EditorRequired] public string ApiBaseUrl { get; set; } = "";
     [Parameter] public int PractitionerId { get; set; }
     [Parameter] public string PractitionerName { get; set; } = "";
+    [Parameter] public DateTime Week { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
     private readonly CancellationTokenSource cancellation = new();
     private Settings? settings;
     private DayHours[] days = [];
@@ -143,11 +139,14 @@
             if (resetHours)
             {
                 hoursVersion = result.Version;
-                days = Enumerable.Range(0, 7).Select(day =>
+                days = Enumerable.Range(0, 7).Select(offset =>
                 {
-                    var periods = result.Rules.Where(r => r.DayOfWeek == day && r.EffectiveFrom <= result.Today)
+                    var date = Week.AddDays(offset);
+                    var day = (int)date.DayOfWeek;
+                    var periods = result.Rules.Where(r => r.DayOfWeek == day && r.EffectiveFrom <= date
+                            && (r.EffectiveThrough is null || r.EffectiveThrough >= date))
                         .Select(r => new Period { Start = FormatTime(r.StartTimeLocal), End = FormatTime(r.EndTimeLocal) }).ToList();
-                    return new DayHours { Day = day, Enabled = periods.Count > 0, Periods = periods.Count > 0 ? periods : [new()] };
+                    return new DayHours { Day = day, Date = date, Enabled = periods.Count > 0, Periods = periods.Count > 0 ? periods : [new()] };
                 }).ToArray();
                 startDate = endDate = result.Today;
             }
@@ -169,8 +168,10 @@
     private Task SaveHoursAsync() => SaveAsync("hours", new
     {
         Version = hoursVersion,
-        Hours = days.Where(d => d.Enabled).SelectMany(d => d.Periods.Select(p => new { DayOfWeek = d.Day, p.Start, p.End })).ToArray()
-    }, "Weekly hours saved. Existing appointments and time off are unchanged.", true);
+        StartDate = Week < settings!.Today ? settings.Today : Week,
+        EndDate = Week.AddDays(6),
+        Hours = days.Where(d => d.Enabled && d.Date >= settings!.Today).SelectMany(d => d.Periods.Select(p => new { DayOfWeek = d.Day, p.Start, p.End })).ToArray()
+    }, "Hours saved for these dates. Other weeks and existing appointments are unchanged.", true);
 
     private Task AddTimeOffAsync() => SaveAsync("time-off", new
     {
@@ -197,6 +198,7 @@
             {
                 message = success;
                 await LoadAsync(resetHours);
+                await OnSaved.InvokeAsync();
             }
             else if (response.StatusCode is System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.Conflict)
                 error = (await response.Content.ReadFromJsonAsync<ApiError>(cancellation.Token))?.Error ?? "Check your availability details.";
@@ -223,9 +225,17 @@
     private DateTime LocalTime(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value,
         TimeZoneInfo.FindSystemTimeZoneById(settings!.TimeZoneId == "Central Standard Time" ? "America/Chicago" : settings.TimeZoneId)).DateTime;
     private static string FormatTime(TimeSpan value) => value.ToString(@"hh\:mm", CultureInfo.InvariantCulture);
-    // Component Lifetime: The parent keys this editor by practitioner; switching cancels requests and discards that editor's drafts.
+    private string FormatTimeOff(TimeOff entry)
+    {
+        var start = LocalTime(entry.StartAtUtc);
+        var end = LocalTime(entry.EndAtUtc);
+        return start.TimeOfDay == TimeSpan.Zero && end.TimeOfDay == TimeSpan.Zero
+            ? $"{start:MMM d, yyyy} – {end.AddDays(-1):MMM d, yyyy} (all day)"
+            : $"{start:MMM d, yyyy h:mm tt} – {end:MMM d, yyyy h:mm tt}";
+    }
+    // Component Lifetime: The parent keys this editor by practitioner and week; switching cancels requests and discards drafts.
     public void Dispose() { disposed = true; cancellation.Cancel(); cancellation.Dispose(); }
-    private sealed class DayHours { public int Day { get; set; } public bool Enabled { get; set; } public List<Period> Periods { get; set; } = []; }
+    private sealed class DayHours { public int Day { get; set; } public DateTime Date { get; set; } public bool Enabled { get; set; } public List<Period> Periods { get; set; } = []; }
     private sealed class Period { public string Start { get; set; } = "09:00"; public string End { get; set; } = "17:00"; }
     private sealed record Rule(int DayOfWeek, TimeSpan StartTimeLocal, TimeSpan EndTimeLocal, DateTime EffectiveFrom, DateTime? EffectiveThrough);
     private sealed record TimeOff(int Id, DateTimeOffset StartAtUtc, DateTimeOffset EndAtUtc);

@@ -110,4 +110,45 @@ public class PractitionerAvailabilityTests
         Assert.NotEqual(PractitionerAvailability.Version(original), PractitionerAvailability.Version([original[0] with { EndTimeLocal = TimeSpan.FromHours(16) }]));
         Assert.NotEqual(PractitionerAvailability.Version(original), PractitionerAvailability.Version([original[0] with { EffectiveThrough = Today.AddDays(7) }]));
     }
+
+    [Fact]
+    public void DatedHoursReplaceOnlySelectedWeekAndPreserveOtherWeeks()
+    {
+        WeeklyHours[] original = [new(1, TimeSpan.FromHours(9), TimeSpan.FromHours(17), Today.AddDays(-30), null)];
+        var start = new DateTime(2026, 1, 12);
+        var end = start.AddDays(6);
+        var result = PractitionerAvailability.ReplaceDateRange(original,
+            new(null, [new(1, "10:00", "14:00")], start, end), Today);
+        var windows = Availability.Calculate(Today, Central, result, [], [], Today.AddDays(-1));
+        foreach (var date in new[] { new DateTime(2026, 1, 5), start, new DateTime(2026, 1, 19) })
+        {
+            var window = Assert.Single(windows, w => TimeZoneInfo.ConvertTimeFromUtc(w.StartAtUtc, Central).Date == date);
+            Assert.Equal(date.AddHours(date == start ? 10 : 9), TimeZoneInfo.ConvertTimeFromUtc(window.StartAtUtc, Central));
+            Assert.Equal(date.AddHours(date == start ? 14 : 17), TimeZoneInfo.ConvertTimeFromUtc(window.EndAtUtc, Central));
+        }
+        Assert.DoesNotContain(result, r => r.EffectiveFrom < Today);
+    }
+
+    [Fact]
+    public void DatedDayOffAndRepeatedSavePreserveBoundedRulesOutsideRange()
+    {
+        WeeklyHours[] original = [new(1, TimeSpan.FromHours(9), TimeSpan.FromHours(17), Today, new DateTime(2026, 1, 26))];
+        var date = new DateTime(2026, 1, 12);
+        var change = new WeeklyHoursChange(null, [], date, date);
+        var result = PractitionerAvailability.ReplaceDateRange(original, change, Today);
+        Assert.Equal(result, PractitionerAvailability.ReplaceDateRange(result, change, Today));
+        var windows = Availability.Calculate(Today, Central, result, [], [], Today.AddDays(-1));
+        Assert.DoesNotContain(windows, w => TimeZoneInfo.ConvertTimeFromUtc(w.StartAtUtc, Central).Date == date);
+        Assert.Equal(3, windows.Count);
+        Assert.All(result, r => Assert.True(r.EffectiveThrough <= new DateTime(2026, 1, 26)));
+    }
+
+    [Fact]
+    public void DatedHoursRejectPastDatesOverlongRangesAndUnrelatedWeekdays()
+    {
+        Assert.Throws<BookingException>(() => PractitionerAvailability.ReplaceDateRange([], new(null, [], Today.AddDays(-1), Today), Today));
+        Assert.Throws<BookingException>(() => PractitionerAvailability.ReplaceDateRange([], new(null, [], Today, Today.AddDays(7)), Today));
+        Assert.Throws<BookingException>(() => PractitionerAvailability.ReplaceDateRange([], new(null, [], Today, null), Today));
+        Assert.Throws<BookingException>(() => PractitionerAvailability.ReplaceDateRange([], new(null, [new(1, "09:00", "17:00")], Today, Today), Today));
+    }
 }
