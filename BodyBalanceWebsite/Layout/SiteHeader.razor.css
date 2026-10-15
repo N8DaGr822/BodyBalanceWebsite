@@ -7,9 +7,10 @@
     padding: 0.25rem 0;
     border: 0;
     background: transparent;
-    color: var(--text-on-navy-muted);
+    color: var(--text-on-navy);
     font: inherit;
-    font-size: 0.88rem;
+    font-size: 0.92rem;
+    font-weight: 500;
     cursor: pointer;
 }
 

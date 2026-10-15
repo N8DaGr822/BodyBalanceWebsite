@@ -7,6 +7,31 @@ namespace BodyBalance.Api;
 
 public sealed partial class ScheduleFunctions
 {
+    [Function("PractitionerCustomerReviews")]
+    public Task<HttpResponseData> PractitionerCustomerReviews(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "practitioner/{practitionerId:int}/customer-reviews")] HttpRequestData request,
+        int practitionerId, CancellationToken cancellationToken) => ExecuteAsync(request, async () =>
+        {
+            var (identity, allowed) = await AccessAsync(request, cancellationToken);
+            if (identity is null || !allowed.Contains(practitionerId))
+                return await JsonAsync(request, HttpStatusCode.Forbidden, new { error = "Sign in with access to this practitioner." });
+            return await JsonAsync(request, HttpStatusCode.OK, await data.GetPractitionerCustomerReviewsAsync(practitionerId, cancellationToken));
+        }, cancellationToken);
+
+    [Function("RemoveCustomerReview")]
+    public Task<HttpResponseData> RemoveCustomerReview(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "practitioner/{practitionerId:int}/customer-reviews/{id:guid}/remove")] HttpRequestData request,
+        int practitionerId, Guid id, CancellationToken cancellationToken) => ExecuteAsync(request, async () =>
+        {
+            var (identity, allowed) = await AccessAsync(request, cancellationToken);
+            if (identity is null || !allowed.Contains(practitionerId))
+                return await JsonAsync(request, HttpStatusCode.Forbidden, new { error = "Sign in with access to this practitioner." });
+            await ReadReviewBodyAsync<JsonElement>(request, cancellationToken);
+            return await data.RemoveCustomerReviewAsync(practitionerId, id, cancellationToken)
+                ? await JsonAsync(request, HttpStatusCode.OK, new { removed = true })
+                : await JsonAsync(request, HttpStatusCode.NotFound, new { error = "This review is unavailable to your account." });
+        }, cancellationToken);
+
     [Function("CustomerReviews")]
     public Task<HttpResponseData> CustomerReviews(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "customer-reviews")] HttpRequestData request,

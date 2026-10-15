@@ -1,4 +1,4 @@
-/* Homepage Hero: Keep the image full width behind the copy at every breakpoint. */
+/* Homepage Hero: Fit the portrait without enlarging or cropping it across a wide screen. */
 .hero--home {
     position: relative;
     isolation: isolate;
@@ -10,7 +10,10 @@
     z-index: -2;
     border-radius: 0;
     aspect-ratio: auto;
-    background-position: center 70%;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: right center;
+    background-color: var(--navy);
 }
 
 .hero--home::before {

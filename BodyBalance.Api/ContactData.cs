@@ -92,7 +92,7 @@ public sealed partial class ScheduleData
         }
         using var details = new SqlCommand("""
             SELECT c.CustomerName, c.CustomerEmail, c.CustomerPhone, c.Message, c.PractitionerId,
-                p.NotificationEmail, p.NotificationPhone
+                p.NotificationEmail, p.NotificationPhone, p.DisplayName
             FROM dbo.ContactMessages c LEFT JOIN dbo.Practitioners p ON p.PractitionerId = c.PractitionerId
             WHERE c.RequestId = @id;
             """, connection);
@@ -101,7 +101,8 @@ public sealed partial class ScheduleData
         if (!await result.ReadAsync(cancellationToken)) return null;
         return new(id, channel, claimId, attempts, new(id, result.GetString(0), result.GetString(1),
             result.IsDBNull(2) ? null : result.GetString(2), result.GetString(3), result.IsDBNull(4) ? null : result.GetInt32(4)),
-            result.IsDBNull(5) ? null : result.GetString(5), result.IsDBNull(6) ? null : result.GetString(6));
+            result.IsDBNull(5) ? null : result.GetString(5), result.IsDBNull(6) ? null : result.GetString(6),
+            result.IsDBNull(7) ? null : result.GetString(7));
     }
 
     public async Task FinishContactNotificationAsync(ContactNotification notification, NotificationResult result, CancellationToken cancellationToken)

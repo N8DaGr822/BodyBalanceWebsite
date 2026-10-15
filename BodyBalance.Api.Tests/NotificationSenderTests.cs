@@ -19,6 +19,7 @@ public class NotificationSenderTests
         configuration["NotificationTestEmail"] = testEmail;
         // Customer confirmations must not depend on the practitioner's private review credentials.
         configuration["BookingReviewSigningKey"] = null;
+        configuration["NotificationFromEmail"] = "hello@entwinedandunwind.com";
         configuration["BookingSiteUrl"] = null;
         var start = new DateTime(2027, month, 15, 18, 0, 0, DateTimeKind.Utc);
         var details = new BookingReviewDetails(Guid.NewGuid(), "Mary", "Alex", "customer@example.com", null,
@@ -32,6 +33,7 @@ public class NotificationSenderTests
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var root = json.RootElement;
             Assert.Equal(testEmail ?? details.CustomerEmail, root.GetProperty("to")[0].GetString());
+            Assert.Equal("Entwined & Unwind <hello@entwinedandunwind.com>", root.GetProperty("from").GetString());
             Assert.Contains("confirmed", root.GetProperty("subject").GetString());
             var text = root.GetProperty("text").GetString()!;
             Assert.Contains("Hi Alex", text);
@@ -198,12 +200,13 @@ public class NotificationSenderTests
         var configuration = Config();
         configuration["BookingSiteUrl"] = "";
         configuration["BookingReviewSigningKey"] = "";
+        configuration["NotificationFromEmail"] = "hello@entwinedandunwind.com";
         using var http = new HttpClient(new Handler(async request =>
         {
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var root = json.RootElement;
             Assert.Equal("practice@example.com", root.GetProperty("to")[0].GetString());
-            Assert.Equal("Entwined & Unwind <sender@example.com>", root.GetProperty("from").GetString());
+            Assert.Equal("Entwined & Unwind <hello@entwinedandunwind.com>", root.GetProperty("from").GetString());
             Assert.Equal("client@example.com", root.GetProperty("reply_to").GetString());
             Assert.Equal("Contact subject", root.GetProperty("subject").GetString());
             Assert.Equal("Contact text", root.GetProperty("text").GetString());

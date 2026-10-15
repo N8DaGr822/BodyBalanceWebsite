@@ -1,0 +1,100 @@
+@using System.Text.Json
+@implements IDisposable
+@inject HttpClient Http
+
+<h3>@PractitionerName's reviews</h3>
+@if (loading) { <p role="status">Loading reviews...</p> }
+else if (reviews is not null)
+{
+    @if (reviews.Length == 0) { <p>No published reviews.</p> }
+    @if (reviews.Length == 100) { <p>Showing the latest 100 reviews. Remove reviews and refresh to see older entries.</p> }
+    @foreach (var review in reviews)
+    {
+        <article class="calendar-notice" @key="review.RequestId">
+            <h4>@review.Name</h4>
+            <p style="white-space:pre-wrap">@review.Message</p>
+            @if (removeId == review.RequestId)
+            {
+                <p>Remove this review from the website?</p>
+                <button type="button" class="btn btn-navy" disabled="@busy" @onclick="() => RemoveAsync(review.RequestId)">Confirm removal</button>
+                <button type="button" class="btn btn-cream" disabled="@busy" @onclick="() => removeId = null">Cancel</button>
+            }
+            else
+            {
+                <button type="button" class="btn btn-cream" disabled="@busy" @onclick="() => removeId = review.RequestId">Remove review</button>
+            }
+        </article>
+    }
+}
+@if (error is not null) { <p class="calendar-notice" role="alert">@error</p> }
+@if (message is not null) { <p role="status">@message</p> }
+<button type="button" class="btn btn-cream" disabled="@(loading || busy)" @onclick="LoadAsync">Refresh reviews</button>
+
+@code {
+    [Parameter, EditorRequired] public string ApiBaseUrl { get; set; } = "";
+    [Parameter] public int PractitionerId { get; set; }
+    [Parameter, EditorRequired] public string PractitionerName { get; set; } = "";
+    private readonly CancellationTokenSource cancellation = new();
+    private Review[]? reviews;
+    private Guid? removeId;
+    private bool loading = true;
+    private bool busy;
+    private bool disposed;
+    private string? error;
+    private string? message;
+    private string Endpoint => $"{ApiBaseUrl.TrimEnd('/')}/practitioner/{PractitionerId}/customer-reviews";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        removeId = null;
+        reviews = null;
+        try
+        {
+            var result = await Http.GetFromJsonAsync<Review[]>(Endpoint, cancellation.Token) ?? throw new JsonException();
+            if (!disposed) reviews = result;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed) error = "We couldn't load reviews. Refresh or sign in again.";
+        }
+        finally { loading = false; }
+    }
+
+    private async Task RemoveAsync(Guid id)
+    {
+        if (busy || loading) return;
+        busy = true;
+        error = null;
+        message = null;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{Endpoint}/{id}/remove");
+            request.Headers.Add("X-Booking-Review", "1");
+            request.Content = JsonContent.Create(new { });
+            using var response = await Http.SendAsync(request, cancellation.Token);
+            response.EnsureSuccessStatusCode();
+            if (disposed) return;
+            message = "Review removed from the website.";
+            await LoadAsync();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+        {
+            if (!disposed)
+            {
+                reviews = null;
+                error = "We couldn't confirm removal. Refresh reviews before trying again, or sign in again if your session expired.";
+            }
+        }
+        finally { busy = false; }
+    }
+
+    // Component Lifetime: The parent keys each review list by practitioner; switching cancels pending requests.
+    public void Dispose() { disposed = true; cancellation.Cancel(); cancellation.Dispose(); }
+    private sealed record Review(Guid RequestId, string Name, string Message);
+}

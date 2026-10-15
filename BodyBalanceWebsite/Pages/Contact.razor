@@ -39,8 +39,9 @@
                         <ValidationSummary />
                         <fieldset disabled="@(submitting || retryPending || loadingPractitioners || practitioners.Length == 0)">
                             <legend>Send us a message</legend>
+                            <p>Mary and Leslie both receive messages sent through this form.</p>
                             <div class="calendar-practitioner">
-                                <label for="contact-practitioner">Who would you like to contact?</label>
+                                <label for="contact-practitioner">Who is your message for?</label>
                                 <InputSelect id="contact-practitioner" @bind-Value="model.PractitionerId">
                                     <option value="">Choose Mary or Leslie</option>
                                     @foreach (var person in practitioners)
@@ -92,14 +93,7 @@
                     <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.3" /><path d="m4 6.5 8 6 8-6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
                     <div>
                         <strong>Email</strong>
-                        <span>hello@returntoselfreiki.com</span>
-                    </div>
-                </div>
-                <div class="contact-detail-item">
-                    <svg viewBox="0 0 24 24" fill="none"><path d="M4 5c0 8 7 15 15 15l2-4-5-2-1.5 1.5A12 12 0 0 1 9 10.5L10.5 9 8.5 4 4 5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
-                    <div>
-                        <strong>Phone</strong>
-                        <span>(555) 123-4567</span>
+                        <a href="mailto:hello@entwinedandunwind.com">hello@entwinedandunwind.com</a>
                     </div>
                 </div>
                 <div class="contact-detail-item">

@@ -6,3 +6,5 @@ IF NOT EXISTS (SELECT 1 FROM dbo.SchemaVersions WHERE Version = 10)
 IF DATABASE_PRINCIPAL_ID(N'bodybalance-api') IS NULL
     THROW 50002, 'Configure the API database identity first.', 1;
 GRANT SELECT, INSERT ON OBJECT::dbo.CustomerReviews TO [bodybalance-api];
+IF EXISTS (SELECT 1 FROM dbo.SchemaVersions WHERE Version = 11)
+    GRANT UPDATE ON OBJECT::dbo.CustomerReviews (IsRemoved) TO [bodybalance-api];

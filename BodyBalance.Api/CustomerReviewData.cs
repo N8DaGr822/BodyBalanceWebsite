@@ -11,6 +11,7 @@ public sealed partial class ScheduleData
         using var command = new SqlCommand("""
             SELECT TOP (100) r.RequestId, r.DisplayName, r.Message, p.DisplayName
             FROM dbo.CustomerReviews r JOIN dbo.Practitioners p ON p.PractitionerId = r.PractitionerId
+            WHERE r.IsRemoved = 0
             ORDER BY r.CreatedAtUtc DESC, r.RequestId;
             """, connection);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -18,6 +19,36 @@ public sealed partial class ScheduleData
         while (await reader.ReadAsync(cancellationToken))
             result.Add(new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
         return result;
+    }
+
+    public async Task<List<CustomerReviewDetails>> GetPractitionerCustomerReviewsAsync(int practitionerId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        using var command = new SqlCommand("""
+            SELECT TOP (100) r.RequestId, r.DisplayName, r.Message, p.DisplayName
+            FROM dbo.CustomerReviews r JOIN dbo.Practitioners p ON p.PractitionerId = r.PractitionerId
+            WHERE r.PractitionerId = @practitionerId AND r.IsRemoved = 0
+            ORDER BY r.CreatedAtUtc DESC, r.RequestId;
+            """, connection);
+        command.Parameters.Add("@practitionerId", SqlDbType.Int).Value = practitionerId;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var result = new List<CustomerReviewDetails>();
+        while (await reader.ReadAsync(cancellationToken))
+            result.Add(new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
+        return result;
+    }
+
+    public async Task<bool> RemoveCustomerReviewAsync(int practitionerId, Guid id, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        // Review Removal: Retain the submission reference so retries cannot republish a removed review.
+        using var command = new SqlCommand("""
+            UPDATE dbo.CustomerReviews SET IsRemoved = 1
+            WHERE RequestId = @id AND PractitionerId = @practitionerId;
+            """, connection);
+        command.Parameters.Add("@id", SqlDbType.UniqueIdentifier).Value = id;
+        command.Parameters.Add("@practitionerId", SqlDbType.Int).Value = practitionerId;
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
     public async Task<Guid> SaveCustomerReviewAsync(CustomerReviewRequest request, CancellationToken cancellationToken)

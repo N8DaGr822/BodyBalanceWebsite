@@ -5,7 +5,7 @@ namespace BodyBalance.Api;
 public sealed record ContactRequest(Guid RequestId, string? Name, string? Email, string? Phone, string? Message, int? PractitionerId = null);
 public sealed record ContactReceipt(Guid RequestId);
 public sealed record ContactNotification(Guid RequestId, string Channel, Guid ClaimId, int Attempts, ContactRequest Contact,
-    string? PractitionerEmail = null, string? PractitionerPhone = null);
+    string? PractitionerEmail = null, string? PractitionerPhone = null, string? PractitionerName = null);
 
 public static class ContactMessage
 {
@@ -25,14 +25,15 @@ public static class ContactMessage
         return request with { Name = name, Email = email, Phone = string.IsNullOrEmpty(phone) ? null : phone, Message = message };
     }
 
-    // Recipient Privacy: A selected practitioner's missing destination must never fall back to another inbox.
+    // Shared Inbox: An explicitly configured contact email receives all enquiries; SMS keeps practitioner routing.
     public static string? Recipient(ContactNotification notification, string? sharedRecipient) =>
-        notification.Contact.PractitionerId is null ? sharedRecipient
+        notification.Channel == "Email" && !string.IsNullOrWhiteSpace(sharedRecipient) ? sharedRecipient
+            : notification.Contact.PractitionerId is null ? sharedRecipient
             : notification.Channel == "Email" ? notification.PractitionerEmail : notification.PractitionerPhone;
 
     public static NotificationMessage Notification(ContactNotification notification, string? recipient) => new(
         notification.Channel, recipient, "New contact message for Entwined & Unwind",
-        $"Name: {notification.Contact.Name}\nEmail: {notification.Contact.Email}\nPhone: {notification.Contact.Phone ?? "Not provided"}\nReference: {notification.RequestId:D}\n\n{notification.Contact.Message}",
+        $"For: {notification.PractitionerName ?? "The practice"}\nName: {notification.Contact.Name}\nEmail: {notification.Contact.Email}\nPhone: {notification.Contact.Phone ?? "Not provided"}\nReference: {notification.RequestId:D}\n\n{notification.Contact.Message}",
         $"Return to Self Reiki: New contact message received (ref {notification.RequestId.ToString("N")[..8]}). Check email for details. Reply STOP to unsubscribe.",
         notification.Contact.Email);
 }

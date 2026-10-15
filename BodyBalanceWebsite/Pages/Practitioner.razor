@@ -72,6 +72,11 @@
             {
                 <p>Select a practitioner above to manage their working hours and time off.</p>
             }
+            <h2>Customer reviews</h2>
+            @foreach (var person in inbox.Practitioners.Where(p => practitionerId == 0 || p.PractitionerId == practitionerId))
+            {
+                <PractitionerCustomerReviews @key="person.PractitionerId" ApiBaseUrl="@apiBaseUrl" PractitionerId="@person.PractitionerId" PractitionerName="@person.DisplayName" />
+            }
             <h2>Pending requests</h2>
             <p>Review the price and address before approving. Pending requests do not reserve a time.</p>
             @foreach (var person in inbox.Practitioners)

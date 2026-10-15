@@ -16,13 +16,29 @@ public class ContactMessageTests
     [Theory]
     [InlineData(1, "mary@example.com")]
     [InlineData(2, "leslie@example.com")]
-    public void SelectedPractitionerReceivesTheMessageInsteadOfTheSharedInbox(int practitionerId, string email)
+    public void SelectedPractitionerReceivesTheMessageWhenSharedEmailIsNotConfigured(int practitionerId, string email)
     {
         var contact = Request() with { PractitionerId = practitionerId };
         var notification = new ContactNotification(contact.RequestId, "Email", Guid.NewGuid(), 1, contact, email);
-        Assert.Equal(email, ContactMessage.Recipient(notification, "shared@example.com"));
-        Assert.Null(ContactMessage.Recipient(notification with { PractitionerEmail = null }, "shared@example.com"));
+        Assert.Equal(email, ContactMessage.Recipient(notification, null));
+        Assert.Equal(email, ContactMessage.Recipient(notification, " "));
+        Assert.Null(ContactMessage.Recipient(notification with { PractitionerEmail = null }, null));
         Assert.Null(ContactMessage.Recipient(notification with { Channel = "Sms" }, "+15551234567"));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void ConfiguredSharedEmailOverridesPractitionerEmailButNotSms(int practitionerId)
+    {
+        var contact = Request() with { PractitionerId = practitionerId };
+        var notification = new ContactNotification(contact.RequestId, "Email", Guid.NewGuid(), 1, contact,
+            "personal@example.com", "+15551234567", "Selected practitioner");
+        Assert.Equal("hello@entwinedandunwind.com", ContactMessage.Recipient(notification, "hello@entwinedandunwind.com"));
+        Assert.Equal("+15551234567", ContactMessage.Recipient(notification with { Channel = "Sms" }, "+15559999999"));
+        var message = ContactMessage.Notification(notification, "hello@entwinedandunwind.com");
+        Assert.Contains("For: Selected practitioner", message.EmailText);
+        Assert.Equal(contact.Email, message.ReplyTo);
     }
 
     [Fact]

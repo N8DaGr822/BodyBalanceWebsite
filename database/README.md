@@ -106,7 +106,7 @@ Run `004_contact_messages.sql` after version 3, then `configure_api_contact_acce
 
 The API saves the message and its two notification rows together. A matching GUID retry returns the saved receipt; reusing that GUID with different content fails. New submissions share an application lock for the duplicate check and the practice-wide hourly limit. Contact enquiries never reserve time, require approval, or appear in the appointment inbox. Recipient routing and test overrides are documented in `../BodyBalance.Api/README.md`.
 
-Apply `005_contact_practitioner.sql` before deploying practitioner-specific contact routing. Version 5 adds nullable `ContactMessages.PractitionerId` with a foreign key. Existing messages remain unassigned and keep their legacy shared destination; new submissions require an active practitioner, and GUID replay also compares that choice. New messages use that practitioner's private notification destinations without falling back to the shared inbox. The existing table-level contact grants cover the new column; no additional permissions or backfill are required.
+Apply `005_contact_practitioner.sql` before deploying practitioner-specific contact routing. Version 5 adds nullable `ContactMessages.PractitionerId` with a foreign key. Existing messages remain unassigned and keep their legacy shared destination; new submissions require an active practitioner, and GUID replay also compares that choice. New messages retain the practitioner selection. With the shared-email update, an explicitly configured `ContactRecipientEmail` overrides the email destination for all contact enquiries; SMS still uses the selected practitioner. Unset shared email retains practitioner-specific routing. The existing table-level contact grants cover the new column; no additional permissions or backfill are required.
 
 Monitor privately, using the same provider-reconciliation rules as booking notifications:
 
@@ -143,6 +143,8 @@ Public endpoints return available slots, never customer records or internal exce
 Mary's version 2 offerings and hours are confirmed by the owner. Confirm other practitioners' offerings, locations, hours and buffer policies before seeding additional data.
 
 ## Customer reviews (schema version 10)
+
+For admin removal, also apply `011_customer_review_removal.sql` and rerun `configure_api_customer_review_access.sql` before deploying the updated API. Version 11 adds `IsRemoved` (default false) and the permission script grants column-level UPDATE access. Removed reviews retain their submission references and are excluded from public listings; no DELETE permission is granted.
 
 Before deploying customer reviews, apply `010_customer_reviews.sql` after version 9, then run `configure_api_customer_review_access.sql` as the database administrator. These scripts create durable review storage and grant the API SELECT/INSERT access only. They do not change appointments or contact messages.
 
