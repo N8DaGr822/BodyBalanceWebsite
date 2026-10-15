@@ -57,7 +57,8 @@ public static class PractitionerAvailability
         return new(Availability.ToUtc(start, zone), Availability.ToUtc(end, zone));
     }
 
+    // Blazor Time Inputs: Change events append zero seconds even when the control edits only hours and minutes.
     private static TimeSpan ParseTime(string? value) =>
-        TimeOnly.TryParseExact(value, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var time)
+        TimeOnly.TryParseExact(value, ["HH:mm", "HH:mm':00'"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var time)
             ? time.ToTimeSpan() : throw new BookingException("Enter a valid time in hours and minutes.");
 }

@@ -18,6 +18,19 @@ public class PractitionerAvailabilityTests
     }
 
     [Theory]
+    [InlineData("09:00", "17:00")]
+    [InlineData("09:00:00", "17:00:00")]
+    public void BrowserTimeFormatsWorkForHoursAndPartialDayTimeOff(string start, string end)
+    {
+        var hours = PractitionerAvailability.ValidateHours([new(1, start, end)], Today);
+        Assert.Equal(TimeSpan.FromHours(9), hours[0].StartTimeLocal);
+        Assert.Equal(TimeSpan.FromHours(17), hours[0].EndTimeLocal);
+        var window = PractitionerAvailability.ValidateTimeOff(new(Today, Today, false, start, end), Central, Today);
+        Assert.Equal(TimeSpan.FromHours(8), window.EndAtUtc - window.StartAtUtc);
+    }
+
+    [Theory]
+    [InlineData(1, "09:00:30", "17:00")]
     [InlineData(-1, "09:00", "17:00")]
     [InlineData(7, "09:00", "17:00")]
     [InlineData(1, "17:00", "09:00")]
