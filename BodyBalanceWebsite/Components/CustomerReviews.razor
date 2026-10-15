@@ -1,0 +1,184 @@
+@using System.ComponentModel.DataAnnotations
+@using System.Text.Json
+@implements IDisposable
+@inject HttpClient Http
+@inject IConfiguration Configuration
+
+<div class="section-heading">
+    <span class="eyebrow">Client Experiences</span>
+    <h2>Reviews &amp; Testimonials</h2>
+</div>
+@if (loading)
+{
+    <p role="status">Loading reviews...</p>
+}
+else if (loadFailed)
+{
+    <p class="calendar-notice" role="alert">We couldn't load reviews. Please try again.</p>
+    <button type="button" class="btn btn-cream" @onclick="LoadAsync">Retry loading reviews</button>
+}
+else if (reviews.Length == 0 && !string.IsNullOrWhiteSpace(apiBaseUrl))
+{
+    <p>No reviews yet. Share your experience below.</p>
+}
+@foreach (var review in reviews)
+{
+    <figure class="review-card" @key="review.RequestId">
+        <blockquote><p>@review.Message</p></blockquote>
+        <figcaption>@review.Name &middot; Session with @review.PractitionerName</figcaption>
+    </figure>
+}
+@if (reviews.Length == 100) { <p>Showing the 100 most recent reviews.</p> }
+
+@if (submitted)
+{
+    <p class="calendar-notice" role="status">Thank you! Your review has been published.</p>
+}
+else if (string.IsNullOrWhiteSpace(apiBaseUrl))
+{
+    @if (!string.IsNullOrWhiteSpace(bookingSiteUrl))
+    {
+        <a class="btn btn-navy" href="@(bookingSiteUrl.TrimEnd('/') + "/services#reviews")">Read and add reviews</a>
+    }
+    else
+    {
+        <p class="calendar-notice" role="status">Online reviews are not available on this site yet.</p>
+    }
+}
+else
+{
+    <EditForm Model="model" OnValidSubmit="SubmitAsync" class="booking-form">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+        <fieldset disabled="@(submitting || retryPending || loading || practitioners.Length == 0)">
+            <legend>Share your experience</legend>
+            <p>Your display name and review will be published immediately. Please leave out private contact or health details.</p>
+            <div class="calendar-practitioner">
+                <label for="review-practitioner">Your practitioner</label>
+                <InputSelect id="review-practitioner" @bind-Value="model.PractitionerId">
+                    <option value="">Choose your practitioner</option>
+                    @foreach (var person in practitioners)
+                    {
+                        <option value="@person.PractitionerId">@person.DisplayName</option>
+                    }
+                </InputSelect>
+            </div>
+            <div class="contact-form">
+                <div>
+                    <label for="review-name">Public display name</label>
+                    <InputText id="review-name" @bind-Value="model.Name" maxlength="150" placeholder="First name or initials" />
+                </div>
+                <div>
+                    <label for="review-message">Your review</label>
+                    <InputTextArea id="review-message" @bind-Value="model.Message" maxlength="2000" />
+                </div>
+            </div>
+        </fieldset>
+        @if (!string.IsNullOrEmpty(error)) { <p class="calendar-notice" role="alert">@error</p> }
+        <button type="submit" class="btn btn-navy" disabled="@(submitting || loading || practitioners.Length == 0)">
+            @(submitting ? "Publishing..." : retryPending ? "Retry this review" : "Publish review")
+        </button>
+    </EditForm>
+}
+
+@code {
+    private readonly ReviewFields model = new();
+    private readonly CancellationTokenSource cancellation = new();
+    private Guid requestId = Guid.NewGuid();
+    private string? apiBaseUrl;
+    private string? bookingSiteUrl;
+    private string? error;
+    private bool loading;
+    private bool loadFailed;
+    private bool submitting;
+    private bool submitted;
+    private bool retryPending;
+    private bool disposed;
+    private Review[] reviews = [];
+    private Practitioner[] practitioners = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        apiBaseUrl = Configuration["ScheduleApiBaseUrl"];
+        bookingSiteUrl = Configuration["BookingSiteUrl"];
+        if (!string.IsNullOrWhiteSpace(apiBaseUrl)) await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (loading) return;
+        loading = true;
+        loadFailed = false;
+        try
+        {
+            var people = await Http.GetFromJsonAsync<Practitioner[]>($"{apiBaseUrl!.TrimEnd('/')}/practitioners", cancellation.Token)
+                ?? throw new JsonException("Missing practitioners.");
+            var result = await Http.GetFromJsonAsync<Review[]>($"{apiBaseUrl.TrimEnd('/')}/customer-reviews", cancellation.Token)
+                ?? throw new JsonException("Missing reviews.");
+            if (disposed) return;
+            practitioners = people;
+            reviews = result;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed) loadFailed = true;
+        }
+        finally { loading = false; }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (submitting || submitted || string.IsNullOrWhiteSpace(apiBaseUrl)) return;
+        submitting = true;
+        error = null;
+        try
+        {
+            using var response = await Http.PostAsJsonAsync($"{apiBaseUrl.TrimEnd('/')}/customer-reviews",
+                new { requestId, model.Name, model.Message, model.PractitionerId }, cancellation.Token);
+            if (disposed) return;
+            if (response.IsSuccessStatusCode)
+            {
+                var receipt = await response.Content.ReadFromJsonAsync<ReviewReceipt>(cancellation.Token);
+                if (receipt?.RequestId != requestId) throw new JsonException("Missing review receipt.");
+                submitted = true;
+                retryPending = false;
+                await LoadAsync();
+            }
+            else if (response.StatusCode is System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.Conflict or System.Net.HttpStatusCode.RequestEntityTooLarge)
+            {
+                error = (await response.Content.ReadFromJsonAsync<ApiError>(cancellation.Token))?.Error ?? "Please check your review details.";
+                retryPending = false;
+                requestId = Guid.NewGuid();
+            }
+            else SetUnknown();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed) SetUnknown();
+        }
+        finally { submitting = false; }
+    }
+
+    private void SetUnknown()
+    {
+        // Retry Safety: Keep the original text and reference until the server confirms receipt.
+        retryPending = true;
+        error = "We couldn't confirm whether your review was published. Retry this review before submitting another one.";
+    }
+
+    public void Dispose() { disposed = true; cancellation.Cancel(); cancellation.Dispose(); }
+
+    private sealed class ReviewFields
+    {
+        [Required(ErrorMessage = "Choose your practitioner.")]
+        public int? PractitionerId { get; set; }
+        [Required, StringLength(150)] public string Name { get; set; } = "";
+        [Required, StringLength(2000)] public string Message { get; set; } = "";
+    }
+    private sealed record Review(Guid RequestId, string Name, string Message, string PractitionerName);
+    private sealed record ReviewReceipt(Guid RequestId);
+    private sealed record Practitioner(int PractitionerId, string DisplayName);
+    private sealed record ApiError(string Error);
+}

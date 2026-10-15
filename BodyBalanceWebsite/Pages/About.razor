@@ -2,39 +2,6 @@
 
 <PageTitle>About Us | Entwined &amp; Unwind</PageTitle>
 
-<div @onkeydown="HandleReviewsKeyDown">
-    <button type="button" class="reviews-toggle" aria-expanded="@(reviewsOpen ? "true" : "false")"
-            aria-controls="reviews-drawer" @onclick="ToggleReviews" @ref="reviewsToggle">
-        Reviews
-    </button>
-    @if (reviewsOpen)
-    {
-        <aside id="reviews-drawer" class="reviews-drawer" aria-labelledby="reviews-heading">
-            <div class="reviews-header">
-                <h2 id="reviews-heading">Reviews &amp; Testimonials</h2>
-                <button type="button" class="reviews-close" aria-label="Close reviews" @onclick="CloseReviews" @ref="reviewsClose">&times;</button>
-            </div>
-            <div class="reviews-content" tabindex="0" role="region" aria-label="Client testimonials">
-                @if (testimonials.Length == 0)
-                {
-                    <p>Client stories will be shared here soon.</p>
-                }
-                else
-                {
-                    <p><strong>Preview only:</strong> These are fictional sample reviews for testing.</p>
-                    @foreach (var testimonial in testimonials)
-                    {
-                        <figure class="review-card">
-                            <blockquote><p>@testimonial.Quote</p></blockquote>
-                            <figcaption>@testimonial.Name</figcaption>
-                        </figure>
-                    }
-                }
-            </div>
-        </aside>
-    }
-</div>
-
 <section class="page-hero">
     <div class="container">
         <span class="eyebrow eyebrow--on-navy">About Us</span>
@@ -176,58 +143,3 @@
         </a>
     </div>
 </section>
-
-@code {
-    private bool reviewsOpen;
-    private bool focusReviews;
-    private ElementReference reviewsToggle;
-    private ElementReference reviewsClose;
-
-    // Testimonials: Replace fictional test content with approved client quotes before launch.
-    private readonly (string Quote, string Name)[] testimonials =
-    [
-        ("I felt welcome from the moment I arrived. Mary explained what to expect and gave me plenty of time to settle in. The quiet space was a lovely pause in a busy week.", "Alex — Sample review"),
-        ("Leslie listened patiently and made sure I felt comfortable asking questions. I appreciated the thoughtful pace and the warm, welcoming atmosphere throughout my visit.", "Jordan — Sample review"),
-        ("This was my first Reiki session, and I wasn't sure what to expect. Everything was explained clearly, and I never felt rushed. I enjoyed having time set aside just for myself.", "Taylor — Sample review"),
-        ("Booking was straightforward, and the session felt personal from start to finish. I especially appreciated being asked about my preferences and having space to share what brought me in.", "Morgan — Sample review"),
-        ("The room was peaceful and inviting. Mary checked in with me and made it easy to relax into the experience. It was a thoughtful, gentle way to take a break from my usual routine.", "Casey — Sample review"),
-        ("I appreciated Leslie's kindness and attention. There was time for questions before and after the session, and I left feeling heard. The entire visit felt welcoming and unhurried.", "Riley — Sample review")
-    ];
-
-    private async Task ToggleReviews()
-    {
-        if (reviewsOpen)
-        {
-            await CloseReviews();
-            return;
-        }
-
-        reviewsOpen = true;
-        focusReviews = true;
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        // Drawer Focus: Wait until the close button exists before moving keyboard focus.
-        if (focusReviews)
-        {
-            focusReviews = false;
-            await reviewsClose.FocusAsync(preventScroll: true);
-        }
-    }
-
-    private async Task CloseReviews()
-    {
-        reviewsOpen = false;
-        focusReviews = false;
-        await reviewsToggle.FocusAsync(preventScroll: true);
-    }
-
-    private async Task HandleReviewsKeyDown(KeyboardEventArgs args)
-    {
-        if (args.Key == "Escape" && reviewsOpen)
-        {
-            await CloseReviews();
-        }
-    }
-}

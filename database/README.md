@@ -141,3 +141,9 @@ The C# API must validate service assignments, working hours, blocked times, cont
 Public endpoints return available slots, never customer records or internal exception reasons. Keep SQL credentials/tokens on the backend and give its identity only the required database permissions. The browser must not connect directly to SQL.
 
 Mary's version 2 offerings and hours are confirmed by the owner. Confirm other practitioners' offerings, locations, hours and buffer policies before seeding additional data.
+
+## Customer reviews (schema version 10)
+
+Before deploying customer reviews, apply `010_customer_reviews.sql` after version 9, then run `configure_api_customer_review_access.sql` as the database administrator. These scripts create durable review storage and grant the API SELECT/INSERT access only. They do not change appointments or contact messages.
+
+Reviews publish immediately without moderation or appointment verification. Only the public display name, written review, and selected practitioner are collected. The Services page displays the latest 100 reviews. Submissions use a unique reference so retrying a lost response does not create duplicates. `CustomerReviewsPerHour` limits submissions globally (default 20); it is a capacity guard, not customer identity verification. Administrators can remove abusive entries directly from `dbo.CustomerReviews` by `RequestId`; the API has no DELETE permission.

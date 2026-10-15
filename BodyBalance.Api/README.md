@@ -201,3 +201,9 @@ SQL may need to wake from auto-pause; if the first call returns 503, retry short
 - [SWA authentication](https://learn.microsoft.com/en-us/azure/static-web-apps/authentication-authorization) and [trusted user information](https://learn.microsoft.com/en-us/azure/static-web-apps/user-information)
 - [Twilio message API](https://www.twilio.com/docs/messaging/api/message-resource) and [Resend Send Email API](https://resend.com/docs/api-reference/emails/send-email)
 - [Azure Communication Services retirement](https://learn.microsoft.com/en-us/azure/communication-services/acs-retirement-and-breaking-changes-guide): why this implementation does not use ACS email/SMS
+
+## Customer reviews
+
+`GET /api/customer-reviews` returns the latest 100 public reviews. `POST /api/customer-reviews` accepts `requestId` (UUID), `practitionerId`, `name` (public display name, up to 150 characters), and `message` (up to 2,000 characters). Reviews publish immediately and do not require a verified appointment or approval. No email or phone is collected. Repeating an identical request ID returns the original receipt; changing its content returns a conflict.
+
+Apply `database/010_customer_reviews.sql` and `database/configure_api_customer_review_access.sql` before deploying this feature. Optional `CustomerReviewsPerHour` defaults to 20 total submissions per hour. The Services page uses the existing `ScheduleApiBaseUrl`; static builds without an API can link to the connected site's reviews through `BookingSiteUrl`.
