@@ -12,7 +12,8 @@ namespace BodyBalance.Api;
 
 public sealed record NotificationResult(string State, string? ProviderId = null, string? Error = null);
 public sealed record NotificationMessage(string Channel, string? Recipient, string Subject,
-    string EmailText, string SmsText, string? ReplyTo = null);
+    string EmailText, string SmsText, string? ReplyTo = null,
+    string? IdempotencyKey = null, Dictionary<string, string>? Headers = null);
 
 public sealed class NotificationSender(HttpClient http, IConfiguration configuration)
 {
@@ -61,12 +62,15 @@ public sealed class NotificationSender(HttpClient http, IConfiguration configura
             if (string.IsNullOrWhiteSpace(apiKey) || !ValidEmail(from) || !ValidEmail(recipient))
                 return new("Pending", Error: "EmailNotConfigured");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            if (notification.IdempotencyKey is not null)
+                request.Headers.Add("Idempotency-Key", notification.IdempotencyKey);
             request.Content = JsonContent.Create(new
             {
                 to = new[] { recipient },
                 from = $"Entwined & Unwind <{from}>",
                 subject = notification.Subject,
                 reply_to = ValidEmail(notification.ReplyTo) ? notification.ReplyTo : null,
+                headers = notification.Headers,
                 // Link Privacy: Keep click/open tracking disabled on the Resend sending domain.
                 text = notification.EmailText
             }, options: new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });

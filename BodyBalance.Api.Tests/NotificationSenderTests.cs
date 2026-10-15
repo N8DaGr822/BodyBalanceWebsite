@@ -257,6 +257,22 @@ public class NotificationSenderTests
         Assert.Equal(1, calls);
     }
 
+    [Fact]
+    public async Task InboxRepliesUseStableProviderIdempotencyAndThreadHeaders()
+    {
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            Assert.Equal("inbox/test-reference", request.Headers.GetValues("Idempotency-Key").Single());
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            Assert.Equal("<client-message@example.com>", json.RootElement.GetProperty("headers").GetProperty("In-Reply-To").GetString());
+            Assert.Equal("hello@entwinedandunwind.com", json.RootElement.GetProperty("reply_to").GetString());
+            return new(HttpStatusCode.OK) { Content = new StringContent("{\"id\":\"reply-provider-id\"}") };
+        }));
+        var notification = new NotificationMessage("Email", "client@example.com", "Re: inquiry", "Hello", "",
+            "hello@entwinedandunwind.com", "inbox/test-reference", new() { ["In-Reply-To"] = "<client-message@example.com>" });
+        Assert.Equal("Accepted", (await new NotificationSender(http, Config()).SendAsync(notification, default)).State);
+    }
+
     private static BookingNotification Notification(string channel)
     {
         var requestId = Guid.NewGuid();

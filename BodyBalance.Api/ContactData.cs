@@ -48,6 +48,10 @@ public sealed partial class ScheduleData
             INSERT dbo.ContactMessages (RequestId, CustomerName, CustomerEmail, CustomerPhone, Message, PractitionerId)
             VALUES (@id, @name, @email, @phone, @message, @practitionerId);
             INSERT dbo.ContactNotifications (RequestId, Channel) VALUES (@id, 'Email'), (@id, 'Sms');
+            INSERT dbo.MailConversations (ConversationId, CustomerName, CustomerEmail, Subject)
+                VALUES (@id, @name, @email, N'Website inquiry');
+            INSERT dbo.MailMessages (MessageId, ConversationId, Direction, Sender, Body, State)
+                VALUES (@id, @id, 'Incoming', @email, @message, 'Received');
             """, connection, transaction))
         {
             command.Parameters.Add("@id", SqlDbType.UniqueIdentifier).Value = request.RequestId;

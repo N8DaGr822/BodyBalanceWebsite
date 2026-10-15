@@ -1,0 +1,192 @@
+@page "/admin/messages"
+@using System.Net
+@using System.Text.Json
+@implements IDisposable
+@inject HttpClient Http
+@inject IConfiguration Configuration
+
+<PageTitle>Shared Inbox | Entwined &amp; Unwind</PageTitle>
+<HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
+<section class="page-hero"><div class="container"><h1>Shared Inbox</h1><p>Read client messages and reply together as Entwined &amp; Unwind.</p></div></section>
+<section class="content-section"><div class="container session-calendar">
+    <a href="admin">Back to appointments</a>
+    @if (signInRequired)
+    {
+        <PractitionerSignIn OnSignedIn="LoadAsync" />
+        <p>Both practitioners need shared inbox access. If you are already signed in, ask your administrator to check your inbox permissions.</p>
+    }
+    @if (error is not null) { <p class="calendar-notice" role="alert">@error</p> }
+    @if (notice is not null) { <p role="status">@notice</p> }
+    @if (loading) { <p role="status">Loading messages...</p> }
+    @if (!signInRequired && conversations is not null)
+    {
+        <div class="inbox-layout">
+            <div>
+                <h2>Conversations</h2>
+                <p>Shared by Leslie and Mary. Newest activity first.</p>
+                @if (conversations.Length == 0) { <p>No conversations on this page.</p> }
+                @foreach (var item in conversations)
+                {
+                    <button class="conversation-button" disabled="@(loading || sending)" @onclick="() => OpenAsync(item.ConversationId)" aria-pressed="@(selected?.Conversation.ConversationId == item.ConversationId)">
+                        <strong>@item.CustomerName</strong><span>@item.Subject</span><small>@item.UpdatedAtUtc.ToLocalTime().ToString("g")</small>
+                    </button>
+                }
+                <div class="calendar-navigation">
+                    <button class="btn btn-cream" disabled="@(loading || sending || offset == 0)" @onclick="() => PageAsync(-50)">Newer</button>
+                    <button class="btn btn-cream" disabled="@(loading || sending || conversations.Length < 50)" @onclick="() => PageAsync(50)">Older</button>
+                </div>
+            </div>
+            <div>
+                @if (selected is not null)
+                {
+                    <h2>@selected.Conversation.Subject</h2>
+                    <p>Reply to: <strong>@selected.Conversation.CustomerEmail</strong></p>
+                    <p>Send from: <strong>hello@entwinedandunwind.com</strong></p>
+                    @foreach (var item in selected.Messages.Reverse())
+                    {
+                        <article class="calendar-notice" @key="item.MessageId">
+                            <h3>@(item.Direction == "Incoming" ? "Received" : "Our reply")</h3>
+                            <p>@item.Sender · @item.CreatedAtUtc.ToLocalTime().ToString("g")</p>
+                            <p class="mail-body">@item.Body</p>
+                            @if (item.Direction == "Outgoing")
+                            {
+                                <p>@StateLabel(item.State) · @item.Actor</p>
+                                @if (item.State is "Sending" or "NeedsReview") { <p>Check Resend before sending again. Reference: @item.MessageId</p> }
+                            }
+                            @if (item.HasOriginal) { <a href="@($"{ApiRoot}/admin/mail/{item.MessageId}/original")">Download original email and attachments (.eml)</a> }
+                        </article>
+                    }
+                    <div class="calendar-navigation">
+                        <button class="btn btn-cream" disabled="@(loading || sending || messageOffset == 0)" @onclick="() => MessagesPageAsync(-25)">Newer messages</button>
+                        <button class="btn btn-cream" disabled="@(loading || sending || selected.Messages.Length < 25)" @onclick="() => MessagesPageAsync(25)">Older messages</button>
+                    </div>
+                    <label for="inbox-reply">Your reply</label>
+                    <textarea id="inbox-reply" rows="8" maxlength="10000" @bind="draft" disabled="@(loading || sending || uncertain)"></textarea>
+                    <p>Review the address and message before sending. Replies go to this client; both practitioners can read them here.</p>
+                    <button class="btn btn-navy" disabled="@(loading || sending || uncertain || string.IsNullOrWhiteSpace(draft) || string.IsNullOrWhiteSpace(selected.Conversation.CustomerEmail))" @onclick="SendAsync">@(sending ? "Sending..." : "Send reply")</button>
+                    <button class="btn btn-cream" disabled="@(loading || sending)" @onclick='() => draft = ""'>Clear draft</button>
+                }
+                else { <p>Select a conversation to read and reply.</p> }
+            </div>
+        </div>
+    }
+    <button class="btn btn-cream" disabled="@(loading || sending)" @onclick="LoadAsync">Refresh inbox</button>
+</div></section>
+
+@code {
+    private readonly CancellationTokenSource cancellation = new();
+    private Conversation[]? conversations;
+    private ConversationDetail? selected;
+    private string draft = "";
+    private Guid replyId = Guid.NewGuid();
+    private int offset, messageOffset;
+    private bool loading, sending, signInRequired, disposed, uncertain;
+    private string? error, notice;
+    private string ApiRoot => (Configuration["ScheduleApiBaseUrl"] ?? "").TrimEnd('/');
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        if (sending || loading) return;
+        loading = true;
+        error = null;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(ApiRoot)) throw new InvalidOperationException();
+            using var response = await Http.GetAsync($"{ApiRoot}/admin/conversations?offset={offset}", cancellation.Token);
+            signInRequired = response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
+            if (signInRequired) { conversations = null; selected = null; draft = ""; return; }
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<Conversation[]>(cancellation.Token) ?? throw new JsonException();
+            if (disposed) return;
+            conversations = result;
+            if (selected is not null) await ReadConversationAsync(selected.Conversation.ConversationId);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException or InvalidOperationException)
+        { if (!disposed) error = "We couldn't load the inbox. Refresh or sign in again."; }
+        finally { loading = false; }
+    }
+
+    private async Task ReadConversationAsync(Guid id)
+    {
+        var result = await Http.GetFromJsonAsync<ConversationDetail>($"{ApiRoot}/admin/conversations/{id}?offset={messageOffset}", cancellation.Token) ?? throw new JsonException();
+        if (!disposed)
+        {
+            selected = result;
+            var previous = result.Messages.FirstOrDefault(message => message.MessageId == replyId);
+            if (uncertain && previous?.State is "Accepted" or "NotSent")
+            {
+                if (previous.State == "Accepted") { draft = ""; notice = "Your previous reply was accepted by Resend."; }
+                replyId = Guid.NewGuid();
+                uncertain = false;
+            }
+        }
+    }
+
+    private async Task OpenAsync(Guid id)
+    {
+        if (loading || sending) return;
+        if (!string.IsNullOrWhiteSpace(draft) && selected?.Conversation.ConversationId != id)
+        { error = "Send or clear your draft before opening another conversation."; return; }
+        loading = true;
+        error = null;
+        notice = null;
+        messageOffset = 0;
+        if (selected?.Conversation.ConversationId != id) { draft = ""; replyId = Guid.NewGuid(); uncertain = false; }
+        selected = null;
+        try { await ReadConversationAsync(id); }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        { if (!disposed) error = "We couldn't load this conversation. Refresh or sign in again."; }
+        finally { loading = false; }
+    }
+
+    private async Task PageAsync(int change) { offset += change; await LoadAsync(); }
+    private async Task MessagesPageAsync(int change) { messageOffset += change; await LoadAsync(); }
+
+    private async Task SendAsync()
+    {
+        if (selected is null || sending || loading || uncertain || string.IsNullOrWhiteSpace(draft)) return;
+        sending = true;
+        error = null;
+        notice = null;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiRoot}/admin/conversations/{selected.Conversation.ConversationId}/reply");
+            request.Headers.Add("X-Booking-Review", "1");
+            request.Content = JsonContent.Create(new { messageId = replyId, body = draft });
+            using var response = await Http.SendAsync(request, cancellation.Token);
+            if (response.StatusCode == HttpStatusCode.BadRequest)
+            {
+                var problem = await response.Content.ReadFromJsonAsync<Problem>(cancellation.Token);
+                error = problem?.Error ?? "Check your reply and try again.";
+                return;
+            }
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<SendResult>(cancellation.Token) ?? throw new JsonException();
+            if (disposed) return;
+            if (result.State == "Accepted")
+            {
+                draft = "";
+                replyId = Guid.NewGuid();
+                notice = "Resend accepted your reply. Delivery can be checked in Resend.";
+            }
+            else { uncertain = true; error = "This conversation has an unconfirmed send. Check Resend before sending again."; }
+            messageOffset = 0;
+            await ReadConversationAsync(selected.Conversation.ConversationId);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        { if (!disposed) { uncertain = true; error = "We couldn't confirm the send. Refresh and check the conversation and Resend before sending again."; } }
+        finally { sending = false; }
+    }
+
+    private static string StateLabel(string state) => state switch { "Accepted" => "Accepted by Resend", "Sending" => "Send pending confirmation", "NotSent" => "Confirmed not sent", _ => "Send needs review" };
+    public void Dispose() { disposed = true; cancellation.Cancel(); cancellation.Dispose(); }
+    private sealed record Conversation(Guid ConversationId, string CustomerName, string CustomerEmail, string Subject, DateTime UpdatedAtUtc);
+    private sealed record Entry(Guid MessageId, string Direction, string Sender, string Body, DateTime CreatedAtUtc, string State, string? ProviderId, bool HasOriginal, string? Actor);
+    private sealed record ConversationDetail(Conversation Conversation, Entry[] Messages);
+    private sealed record SendResult(string State);
+    private sealed record Problem(string Error);
+}

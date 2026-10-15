@@ -6,6 +6,13 @@ namespace BodyBalance.Api;
 public sealed class BookingNotifications(ScheduleData data, NotificationSender sender, IConfiguration configuration,
     ILogger<BookingNotifications> logger)
 {
+    public Task<NotificationResult> SendInboxReplyAsync(MailConversation conversation, MailReply reply, string? inReplyTo,
+        CancellationToken cancellationToken) => sender.SendAsync(new NotificationMessage("Email", conversation.CustomerEmail,
+            $"Re: {conversation.Subject} [EW:{conversation.ConversationId:N}]", reply.Body!, "",
+            configuration["NotificationFromEmail"], $"inbox/{reply.MessageId:D}",
+            inReplyTo is null ? null : new() { ["In-Reply-To"] = $"<{inReplyTo}>", ["References"] = $"<{inReplyTo}>" }),
+            cancellationToken);
+
     public Task<NotificationResult> SendSignInCodeAsync(string email, string code, CancellationToken cancellationToken) =>
         // Authentication Delivery: Codes must never be redirected by notification test settings.
         sender.SendAsync(new NotificationMessage("Email", email, "Your Entwined & Unwind sign-in code",

@@ -1,0 +1,7 @@
+.inbox-layout { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr); gap: 2rem; margin: 2rem 0; }
+.conversation-button { display: block; width: 100%; text-align: left; padding: 1rem; margin-bottom: .5rem; border: 1px solid var(--navy); border-radius: .5rem; background: var(--cream-pale); color: var(--navy); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.conversation-button[aria-pressed="true"] { border-width: 3px; }
+.conversation-button span, .conversation-button small { display: block; }
+.mail-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+textarea { display: block; width: 100%; box-sizing: border-box; font: inherit; padding: 1rem; margin: .5rem 0; }
+@media (max-width: 760px) { .inbox-layout { grid-template-columns: 1fr; } }

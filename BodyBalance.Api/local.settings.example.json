@@ -17,7 +17,9 @@
     "BookingRequestsPerPractitionerPerHour": "20",
     "ContactRecipientEmail": "hello@entwinedandunwind.com",
     "ContactRecipientPhone": "",
-    "ContactMessagesPerHour": "20"
+    "ContactMessagesPerHour": "20",
+    "SharedInboxPractitionerIds": "",
+    "InboxWebhookSecret": ""
   },
   "Host": {
     "CORS": "http://localhost:5171",

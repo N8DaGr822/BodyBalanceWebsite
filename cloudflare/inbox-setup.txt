@@ -1,0 +1,84 @@
+Shared inbox deployment -- Entwined & Unwind
+
+Prepared files do not change production until these steps are completed.
+Production database inspected October 15, 2026: schema 11; Mary=1, Leslie=2.
+
+1. Azure SQL / bodybalance:
+   Run database/012_shared_inbox.sql, then database/configure_api_inbox_access.sql.
+   These add two tables, import existing contact inquiries, and grant the existing
+   bodybalance-api identity SELECT/INSERT/UPDATE on those tables. No data is deleted.
+   The old API can continue running after migration. The new API requires both scripts.
+
+2. Azure Static Web App / bodybalance-web / Environment variables:
+   SharedInboxPractitionerIds = 1,2
+   InboxWebhookSecret = a newly generated random secret of at least 32 bytes
+   Keep NotificationFromEmail and ContactRecipientEmail = hello@entwinedandunwind.com.
+   Keep ResendApiKey configured. Leave NotificationTestEmail and NotificationTestPhone
+   empty for live inbox replies. Do not put secrets in source control or chat.
+   Generate the secret in a password manager; reuse the exact same value in step 4.
+
+3. Build, review and deploy the API and Blazor app using the existing Azure workflow.
+   The app adds /admin/messages and a link from appointment administration.
+   Confirm anonymous GET /api/admin/conversations returns 403 before using the inbox.
+
+4. Cloudflare:
+   Create a private R2 bucket named entwined-inbox-pending (do not enable public access).
+   If R2 needs billing enrollment, the account owner must approve and complete it.
+   In the existing entwined-email-forwarder Worker, add:
+     R2 bucket binding INBOX_PENDING -> entwined-inbox-pending
+     Secret INBOX_WEBHOOK_SECRET -> same secret as Azure InboxWebhookSecret
+     Text variable INBOX_URL -> https://entwinedandunwind.com/api/mail/incoming
+   Add Cron Trigger: */5 * * * *
+   Replace Worker code with entwined-email-forwarder.mjs and deploy.
+   Keep the hello route pointing at that Worker and both Gmail addresses verified.
+   No MX changes and no Resend receiving-domain setup are needed.
+
+5. Test with an address outside both forwarding destinations:
+   - Submit a contact inquiry: visible once in shared inbox; Gmail copies still arrive.
+   - Sign in as Mary, reply in the app: client sees hello as sender and reply address.
+   - Client replies: conversation gains the reply; both Gmail copies arrive.
+   - Sign in as Leslie: same conversation and sent history are visible.
+   - Send a new email directly to hello: a new conversation appears.
+   - Test an HTML-only message and an attachment; download the original .eml.
+   - Confirm two rapid sends with the same message reference produce one outgoing row.
+   Do not test with real client information.
+
+Operations and limits:
+   Incoming MIME is stored in private R2 before delivery and removed only after a 2xx
+   API response. SQL stores the original .eml including attachments. Failed deliveries
+   stay in R2 and a cron retries 10 messages per run, advancing past failed messages.
+   Monitor Worker errors and pending/ objects; persistent failures need intervention.
+   Gmail forwarding is independent of storage/API success. A Gmail forwarding failure
+   is logged, not automatically retried by this Worker (inspect Email Routing activity).
+   Do not add an automatic expiration lifecycle to pending objects: it could lose mail.
+   Original email limit: 25 MiB. Display limit: 100,000 text characters; original remains.
+   Outgoing replies are text only, maximum 10,000 characters. Attachment sending is
+   not included. Incoming attachment viewing uses the .eml download or Gmail copy.
+   Existing website inquiries are imported. Historical Gmail mail is not imported.
+   Gmail replies sent outside the app are not synchronized into app sent history.
+   Conversation matching uses the EW subject reference plus matching reply address,
+   or incoming References/In-Reply-To matching previously stored incoming messages.
+   A client who changes their subject and removes references starts a new conversation.
+   Sender identity is not proven by receipt; staff must review messages before replying.
+   API access fails closed unless the signed-in practitioner's ID is explicitly listed.
+   Accepted means accepted by Resend, not confirmed delivery. Check Resend for bounces.
+
+Uncertain outgoing sends:
+   Sending or NeedsReview blocks further sends on that conversation. Never blindly
+   resend after a timeout. Inspect Resend using timestamp, recipient and message text.
+   If accepted, an administrator can reconcile the exact MessageId as Accepted and
+   record its Resend ProviderId. If verified not sent, set that row to NotSent.
+   Then refresh the inbox. Only mark NotSent after confirming no delivery occurred.
+   The same message reference never sends a second time; a new reply uses a new ID.
+   Resend also receives an Idempotency-Key for each outgoing reply.
+
+Rollback:
+   Restore the prior Worker code to retain Gmail-only forwarding. Roll back the app
+   deployment if needed, but keep the additive SQL tables and pending R2 objects.
+   Do not delete stored conversations or pending mail during rollback.
+
+Validation:
+   dotnet test BodyBalance.Api.Tests/BodyBalance.Api.Tests.csproj
+   dotnet build BodyBalanceWebsite/BodyBalanceWebsite.csproj
+   node --test cloudflare/entwined-email-forwarder.test.mjs
+   SQL execution and live round-trip verification require the deployment steps above.
