@@ -2,6 +2,14 @@
 
 Target: Azure SQL database `bodybalance` on `body-balance.database.windows.net`.
 
+## Distance Reiki (version 8)
+
+After version 7, apply `008_distance_reiki.sql` to add Mary's 30-Minute Distance Reiki at $44, with no separate introductory price, matching the Reiki page. It uses Mary's existing hours, notice period, and appointment conflict checks. A successful rerun is a no-op; an existing service with the same name stops the migration for review. Deploy the website changes to show one Available marker per bookable date and general Tuesday–Saturday, 10 AM–6 PM Central hours instead of dated windows. Booking times remain visible after selecting a date; this does not conceal availability from someone inspecting the public booking API. For distance sessions, Mary should confirm remote session details in the location field when approving the request.
+
+## 30-minute Reiki pricing (version 7)
+
+After version 6, apply `007_thirty_minute_reiki_pricing.sql`. This changes Mary's 30-Minute Reiki to `Price = 55`, `RegularPrice = NULL`, and `FirstTimeClientPrice = 44`, superseding the version 2 promotion below. The schedule dropdown displays $55 and the existing text below explains the $44 first-time client price, just like the 60-minute session. New requests use the existing first-visit eligibility rules; existing appointment prices remain unchanged. No frontend or API deployment is required. The migration rolls back if the original Mary-only service configuration does not match, and a successful rerun is a no-op.
+
 ## Practitioner email sign-in (version 6)
 
 After version 5, apply `006_practitioner_login.sql`, then `configure_api_login_access.sql`. This creates empty account/session tables; no accounts are automatically authorized. An administrator must explicitly provision and enable each approved email with its practitioner ID. The API can update code/attempt fields and create/revoke sessions, but cannot create accounts or change their identity, email or enabled state. Notification addresses do not confer login access. See the API README for security limits, revocation and verification steps.

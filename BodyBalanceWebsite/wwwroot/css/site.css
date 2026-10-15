@@ -966,6 +966,7 @@ button {
 }
 
 .session-calendar .monthly-calendar {
+    min-width: 38.5rem;
     grid-template-columns: repeat(7, minmax(0, 1fr));
     grid-template-rows: 3rem;
     grid-auto-rows: clamp(3.5rem, 9vw, 6.5rem);
@@ -973,6 +974,17 @@ button {
 
 .session-calendar .header-name {
     line-height: 3rem;
+}
+
+/* Calendar Labels: Keep availability readable instead of clipping it to viewport height. */
+.session-calendar .monthly-task {
+    height: auto;
+    min-height: 1.5rem;
+    line-height: 1.5;
+    font-size: 0.8rem;
+    padding: 2px 4px;
+    margin-left: 2px;
+    margin-right: 2px;
 }
 
 .session-calendar .monthly-today {

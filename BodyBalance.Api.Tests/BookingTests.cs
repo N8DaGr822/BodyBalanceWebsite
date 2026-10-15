@@ -16,12 +16,14 @@ public class BookingTests
     }
 
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public void ThirtyMinutePromotionAppliesToAllClients(bool firstVisit, bool hasHistory)
+    [InlineData(true, false, 44)]
+    [InlineData(true, true, 55)]
+    [InlineData(false, false, 55)]
+    [InlineData(false, true, 55)]
+    public void ThirtyMinuteFirstVisitPriceRequiresAClaimAndNoHistory(bool firstVisit, bool hasHistory, decimal expected)
     {
-        var service = new Service(1, "30-Minute Reiki", 30, 44, "USD", null, 55, null);
-        Assert.Equal(44, Booking.Price(service, firstVisit, hasHistory));
+        var service = new Service(1, "30-Minute Reiki", 30, 55, "USD", null, null, 44);
+        Assert.Equal(expected, Booking.Price(service, firstVisit, hasHistory));
     }
 
     [Fact]

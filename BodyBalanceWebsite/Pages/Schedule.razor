@@ -98,7 +98,7 @@
                 }
                 else
                 {
-                    <p>@location. Please request at least @minimumNoticeHours hours in advance.</p>
+                    <p>In-person sessions: @location. Distance Reiki sessions are offered remotely. Please request at least @minimumNoticeHours hours in advance.</p>
                     <p>Click an available day on the calendar or choose a date below, then select a time to enter your contact details.</p>
                 }
                 @if (!string.IsNullOrEmpty(calendarSelectionNotice))
@@ -130,17 +130,11 @@
                         OffersFirstVisitPrice="@(services.First(s => s.ServiceId == serviceId).FirstTimeClientPrice is not null)" />
                 }
             </div>
-            @if (appointments.Length > 0)
+            @if (practitioners.FirstOrDefault(p => p.PractitionerId == practitionerId)?.DisplayName == "Mary")
             {
                 <div class="calendar-windows">
                     <h3>Available hours</h3>
-                    <p>These are open time windows, not bookable session slots.</p>
-                    <ul>
-                        @foreach (var window in appointments)
-                        {
-                            <li>@window.DateStart.ToString("MMM d, h:mm tt") &ndash; @window.DateEnd.ToString("MMM d, h:mm tt")</li>
-                        }
-                    </ul>
+                    <p>Tuesday &ndash; Saturday, 10 AM &ndash; 6 PM Central Time.</p>
                 </div>
             }
         </div>
@@ -274,15 +268,16 @@
             bookingEnabled = result.BookingEnabled;
             location = result.Location;
             minimumNoticeHours = result.MinimumNoticeHours;
-            appointments = result.Windows.Select((window, index) => new Tasks
+            // Calendar Privacy: Publish one date marker, never the gaps between appointments.
+            appointments = slots.Select(slot => LocalTime(slot.StartAtUtc).Date).Distinct().Select((day, index) => new Tasks
             {
                 ID = index + 1,
-                DateStart = TimeZoneInfo.ConvertTimeFromUtc(window.StartAtUtc.UtcDateTime, zone),
-                DateEnd = TimeZoneInfo.ConvertTimeFromUtc(window.EndAtUtc.UtcDateTime, zone),
-                Caption = "Available hours", Code = "Open", Color = "#ece2cd", ForeColor = "#22304a",
+                DateStart = day,
+                DateEnd = day,
+                Caption = "Select a date to see appointment times", Code = "Available", Color = "#ece2cd", ForeColor = "#22304a",
                 NotBeDraggable = true
             }).ToArray();
-            notice = appointments.Length == 0 ? "No available hours are published for this month." : "Available hours are shown below.";
+            notice = appointments.Length == 0 ? "No session times are available for this month." : "Days marked Available have appointment times. Select a date to see them.";
             if (serviceId > 0 && slots.Length == 0)
                 notice = "No session times are available for this service this month.";
         }
