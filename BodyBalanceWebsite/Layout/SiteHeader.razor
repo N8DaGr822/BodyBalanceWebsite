@@ -25,6 +25,7 @@
                 @if (servicesOpen)
                 {
                     <div id="services-drawer" class="services-drawer">
+                        <NavLink href="services" Match="NavLinkMatch.All" @onclick="Close">All Services</NavLink>
                         <NavLink href="services/reiki" @onclick="Close">Reiki</NavLink>
                         <NavLink href="services/body-balancing" @onclick="Close">Body Balancing</NavLink>
                     </div>
