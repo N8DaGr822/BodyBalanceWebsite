@@ -18,7 +18,7 @@ public sealed partial class ScheduleFunctions
 
     [Function("Conversations")]
     public Task<HttpResponseData> Conversations(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/conversations")] HttpRequestData request,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "practitioner/conversations")] HttpRequestData request,
         CancellationToken cancellationToken) => ExecuteAsync(request, async () =>
         {
             if (!await InboxAccessAsync(request, cancellationToken)) return await JsonAsync(request, HttpStatusCode.Forbidden, new { error = "Sign in with shared inbox access." });
@@ -28,7 +28,7 @@ public sealed partial class ScheduleFunctions
 
     [Function("ConversationMessages")]
     public Task<HttpResponseData> ConversationMessages(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/conversations/{id:guid}")] HttpRequestData request,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "practitioner/conversations/{id:guid}")] HttpRequestData request,
         Guid id, CancellationToken cancellationToken) => ExecuteAsync(request, async () =>
         {
             if (!await InboxAccessAsync(request, cancellationToken)) return await JsonAsync(request, HttpStatusCode.Forbidden, new { error = "Sign in with shared inbox access." });
@@ -40,7 +40,7 @@ public sealed partial class ScheduleFunctions
 
     [Function("ReplyToConversation")]
     public Task<HttpResponseData> ReplyToConversation(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "admin/conversations/{id:guid}/reply")] HttpRequestData request,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "practitioner/conversations/{id:guid}/reply")] HttpRequestData request,
         Guid id, CancellationToken cancellationToken) => ExecuteAsync(request, async () =>
         {
             if (!await InboxAccessAsync(request, cancellationToken)) return await JsonAsync(request, HttpStatusCode.Forbidden, new { error = "Sign in with shared inbox access." });
@@ -98,7 +98,7 @@ public sealed partial class ScheduleFunctions
 
     [Function("DownloadOriginalMail")]
     public Task<HttpResponseData> DownloadOriginalMail(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/mail/{id:guid}/original")] HttpRequestData request,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "practitioner/mail/{id:guid}/original")] HttpRequestData request,
         Guid id, CancellationToken cancellationToken) => ExecuteAsync(request, async () =>
         {
             if (!await InboxAccessAsync(request, cancellationToken)) return request.CreateResponse(HttpStatusCode.Forbidden);

@@ -53,7 +53,7 @@
                                 <p>@StateLabel(item.State) · @item.Actor</p>
                                 @if (item.State is "Sending" or "NeedsReview") { <p>Check Resend before sending again. Reference: @item.MessageId</p> }
                             }
-                            @if (item.HasOriginal) { <a href="@($"{ApiRoot}/admin/mail/{item.MessageId}/original")">Download original email and attachments (.eml)</a> }
+                            @if (item.HasOriginal) { <a href="@($"{ApiRoot}/practitioner/mail/{item.MessageId}/original")">Download original email and attachments (.eml)</a> }
                         </article>
                     }
                     <div class="calendar-navigation">
@@ -93,7 +93,7 @@
         try
         {
             if (string.IsNullOrWhiteSpace(ApiRoot)) throw new InvalidOperationException();
-            using var response = await Http.GetAsync($"{ApiRoot}/admin/conversations?offset={offset}", cancellation.Token);
+            using var response = await Http.GetAsync($"{ApiRoot}/practitioner/conversations?offset={offset}", cancellation.Token);
             signInRequired = response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
             if (signInRequired) { conversations = null; selected = null; draft = ""; return; }
             response.EnsureSuccessStatusCode();
@@ -110,7 +110,7 @@
 
     private async Task ReadConversationAsync(Guid id)
     {
-        var result = await Http.GetFromJsonAsync<ConversationDetail>($"{ApiRoot}/admin/conversations/{id}?offset={messageOffset}", cancellation.Token) ?? throw new JsonException();
+        var result = await Http.GetFromJsonAsync<ConversationDetail>($"{ApiRoot}/practitioner/conversations/{id}?offset={messageOffset}", cancellation.Token) ?? throw new JsonException();
         if (!disposed)
         {
             selected = result;
@@ -153,7 +153,7 @@
         notice = null;
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiRoot}/admin/conversations/{selected.Conversation.ConversationId}/reply");
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiRoot}/practitioner/conversations/{selected.Conversation.ConversationId}/reply");
             request.Headers.Add("X-Booking-Review", "1");
             request.Content = JsonContent.Create(new { messageId = replyId, body = draft });
             using var response = await Http.SendAsync(request, cancellation.Token);

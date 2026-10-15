@@ -19,7 +19,7 @@ Production database inspected October 15, 2026: schema 11; Mary=1, Leslie=2.
 
 3. Build, review and deploy the API and Blazor app using the existing Azure workflow.
    The app adds /admin/messages and a link from appointment administration.
-   Confirm anonymous GET /api/admin/conversations returns 403 before using the inbox.
+   Confirm anonymous GET /api/practitioner/conversations returns 403 before using the inbox.
 
 4. Cloudflare:
    Create a private R2 bucket named entwined-inbox-pending (do not enable public access).
