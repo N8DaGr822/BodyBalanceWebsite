@@ -18,6 +18,10 @@ public sealed class NotificationSender(HttpClient http, IConfiguration configura
 {
     public async Task<NotificationResult> SendAsync(BookingNotification notification, CancellationToken cancellationToken)
     {
+        if (notification.Kind == "Confirmation")
+            return notification.Confirmation is { } confirmation
+                ? await SendAsync(confirmation, cancellationToken)
+                : new("NeedsReview", Error: "ConfirmationDetailsMissing");
         var baseUrl = configuration["BookingSiteUrl"];
         var signingKey = configuration["BookingReviewSigningKey"];
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var site) || site.Scheme != "https"

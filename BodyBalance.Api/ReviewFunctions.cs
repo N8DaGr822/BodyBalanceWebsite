@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Logging;
 
 namespace BodyBalance.Api;
 
@@ -25,7 +26,7 @@ public sealed partial class ScheduleFunctions
         CancellationToken cancellationToken) => ExecuteAsync(request, async () =>
         {
             var decision = await ReadReviewBodyAsync<BookingDecision>(request, cancellationToken);
-            return await ReviewResponseAsync(request, await data.DecideBookingAsync(decision, cancellationToken));
+            return await DecideAndNotifyAsync(request, decision, cancellationToken);
         }, cancellationToken);
 
     [Function("PractitionerInbox")]
@@ -78,7 +79,7 @@ public sealed partial class ScheduleFunctions
             var decision = await ReadReviewBodyAsync<BookingDecision>(request, cancellationToken);
             // Identity Scope: Route and verified account determine the request; caller-supplied tokens are ignored here.
             decision = decision with { RequestId = id, Token = null };
-            return await ReviewResponseAsync(request, await data.DecideBookingAsync(decision, cancellationToken, practitionerId));
+            return await DecideAndNotifyAsync(request, decision, cancellationToken, practitionerId);
         }, cancellationToken);
 
     [Function("DispatchBookingNotifications")]
@@ -95,6 +96,23 @@ public sealed partial class ScheduleFunctions
             var contactProcessed = await notifications.DispatchContactAsync(null, cancellationToken);
             return await JsonAsync(request, HttpStatusCode.OK, new { processed, contactProcessed });
         }, cancellationToken);
+
+    private async Task<HttpResponseData> DecideAndNotifyAsync(HttpRequestData request, BookingDecision decision,
+        CancellationToken cancellationToken, int? practitionerId = null)
+    {
+        var details = await data.DecideBookingAsync(decision, cancellationToken, practitionerId);
+        if (details?.Status == "Confirmed")
+        {
+            try { await notifications.DispatchAsync(details.RequestId, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                // Saved Approval: Delivery failures must not turn a committed approval into a client-visible failure.
+                logger.LogError(exception, "Confirmation dispatch failed for request {RequestId}; inspect the outbox.", details.RequestId);
+            }
+        }
+        return await ReviewResponseAsync(request, details);
+    }
 
     private async Task<int?> AuthorizedPractitionerAsync(HttpRequestData request, Guid id, CancellationToken cancellationToken)
     {

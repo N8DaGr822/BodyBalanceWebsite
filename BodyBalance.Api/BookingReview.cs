@@ -12,6 +12,22 @@ public sealed record BookingReviewDetails(Guid RequestId, string PractitionerNam
 
 public static class BookingReview
 {
+    public static NotificationMessage ConfirmationMessage(BookingReviewDetails details)
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(details.TimeZoneId);
+        var start = TimeZoneInfo.ConvertTime(new DateTimeOffset(details.StartAtUtc), zone);
+        var end = TimeZoneInfo.ConvertTime(new DateTimeOffset(details.EndAtUtc), zone);
+        // Appointment Time: Include the local date and UTC offset to disambiguate daylight-saving time.
+        var when = start.ToString("dddd, MMMM d, yyyy 'at' h:mm tt", CultureInfo.InvariantCulture);
+        var until = end.ToString("h:mm tt", CultureInfo.InvariantCulture);
+        var offset = start.ToString("zzz", CultureInfo.InvariantCulture);
+        return new("Email", details.CustomerEmail, "Your Entwined & Unwind appointment is confirmed",
+            $"Hi {details.CustomerName},\n\n{details.PractitionerName} has accepted your appointment request.\n\n" +
+            $"Session: {details.ServiceName}\nWhen: {when} - {until} ({details.TimeZoneId}, UTC{offset})\n" +
+            $"Location: {details.Location}\nPrice: {details.Price.ToString("0.00", CultureInfo.InvariantCulture)} {details.CurrencyCode}\n\n" +
+            "We look forward to seeing you!\nEntwined & Unwind", "");
+    }
+
     // Approval Links: The server secret recreates the same token for notification retries; SQL stores only its hash.
     public static string CreateToken(Guid requestId, int practitionerId, string? signingKey)
     {

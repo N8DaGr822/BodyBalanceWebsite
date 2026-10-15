@@ -74,6 +74,10 @@ BEGIN TRY
         Price = CASE WHEN @Decision = 'Confirmed' THEN @AgreedPrice ELSE Price END,
         Location = CASE WHEN @Decision = 'Confirmed' THEN @ConfirmedLocation ELSE Location END
     WHERE AppointmentId = @AppointmentId;
+    -- Confirmation Outbox: Scheduled dispatch sends email after this transaction commits.
+    IF @Decision = 'Confirmed'
+        INSERT dbo.BookingNotifications(AppointmentId, Channel, Kind)
+        VALUES (@AppointmentId, 'Email', 'Confirmation');
     COMMIT TRANSACTION;
     SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
     SELECT BookingRequestId, Status, StartAtUtc, EndAtUtc, Price, Location

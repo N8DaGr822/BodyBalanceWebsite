@@ -9,6 +9,56 @@ public class NotificationSenderTests
 {
     private const string Key = "test-key-with-at-least-thirty-two-bytes";
 
+    [Theory]
+    [InlineData(1, "12:00 PM", "-06:00", null)]
+    [InlineData(7, "1:00 PM", "-05:00", "tester@example.com")]
+    public async Task ConfirmationUsesCustomerDetailsAndTestRoutingWithoutPrivateLinks(
+        int month, string time, string offset, string? testEmail)
+    {
+        var configuration = Config();
+        configuration["NotificationTestEmail"] = testEmail;
+        // Customer confirmations must not depend on the practitioner's private review credentials.
+        configuration["BookingReviewSigningKey"] = null;
+        configuration["BookingSiteUrl"] = null;
+        var start = new DateTime(2027, month, 15, 18, 0, 0, DateTimeKind.Utc);
+        var details = new BookingReviewDetails(Guid.NewGuid(), "Mary", "Alex", "customer@example.com", null,
+            "Reiki", start, start.AddMinutes(30), "America/Chicago", 44m, "USD", "Confirmed studio", false, "Confirmed");
+        var notification = Notification("Email") with
+        {
+            Kind = "Confirmation", Confirmation = BookingReview.ConfirmationMessage(details)
+        };
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            var root = json.RootElement;
+            Assert.Equal(testEmail ?? details.CustomerEmail, root.GetProperty("to")[0].GetString());
+            Assert.Contains("confirmed", root.GetProperty("subject").GetString());
+            var text = root.GetProperty("text").GetString()!;
+            Assert.Contains("Hi Alex", text);
+            Assert.Contains("Mary has accepted", text);
+            Assert.Contains("Session: Reiki", text);
+            Assert.Contains(time, text);
+            Assert.Contains("UTC" + offset, text);
+            Assert.Contains("2027", text);
+            Assert.Contains("Location: Confirmed studio", text);
+            Assert.Contains("44.00 USD", text);
+            Assert.DoesNotContain("review-request", text);
+            Assert.DoesNotContain("practitioner@example.com", text);
+            return new(HttpStatusCode.OK) { Content = new StringContent("{\"id\":\"confirmation-email\"}") };
+        }));
+        Assert.Equal("Accepted", (await new NotificationSender(http, configuration).SendAsync(notification, default)).State);
+    }
+
+    [Fact]
+    public async Task ConfirmationWithoutDetailsDoesNotSendPractitionerReviewLink()
+    {
+        using var http = new HttpClient(new Handler(_ => throw new InvalidOperationException("Must not send")));
+        var result = await new NotificationSender(http, Config()).SendAsync(
+            Notification("Email") with { Kind = "Confirmation" }, default);
+        Assert.Equal("NeedsReview", result.State);
+        Assert.Equal("ConfirmationDetailsMissing", result.Error);
+    }
+
     [Fact]
     public async Task AuthenticationEmailCannotBeRedirectedToTheNotificationTester()
     {

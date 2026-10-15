@@ -2,6 +2,14 @@
 
 Target: Azure SQL database `bodybalance` on `body-balance.database.windows.net`.
 
+## Practitioner availability editing
+
+Run `configure_api_availability_access.sql` as administrator before deploying the working-hours/time-off editor. It adds narrowly scoped permissions to the existing `AvailabilityRules` and `AvailabilityExceptions` tables; no schema migration is needed. Writes are restricted to authorized practitioners in the API. Weekly saves preserve historical rules and replace recurring hours from today onward; time-off saves reject confirmed appointment overlaps under the shared practitioner booking lock. See the API README for request formats, behavior, and database verification checks.
+
+## Customer confirmation emails (version 9)
+
+Apply `009_booking_confirmations.sql` after version 8 and before deploying the updated API or using the updated `review_booking_request.sql`. Existing table-level API grants cover the new column; no new permissions are needed. Approval saves a customer email in the same transaction, separately from practitioner request notifications. Existing confirmations are not backfilled. Validate transaction rollback, concurrent/replayed approvals, migration reruns, and outbox claims against a non-production SQL database before deployment. When inspecting or resetting booking notifications, identify the exact `(AppointmentId, Channel, Kind)` row. Confirmation emails are eligible only while confirmed and before their start time; request notifications retain their existing expiry policy.
+
 ## Distance Reiki (version 8)
 
 After version 7, apply `008_distance_reiki.sql` to add Mary's 30-Minute Distance Reiki at $44, with no separate introductory price, matching the Reiki page. It uses Mary's existing hours, notice period, and appointment conflict checks. A successful rerun is a no-op; an existing service with the same name stops the migration for review. Deploy the website changes to show one Available marker per bookable date and general Tuesday–Saturday, 10 AM–6 PM Central hours instead of dated windows. Booking times remain visible after selecting a date; this does not conceal availability from someone inspecting the public booking API. For distance sessions, Mary should confirm remote session details in the location field when approving the request.
@@ -76,7 +84,7 @@ New appointment submissions and their two notification rows commit together. Onl
 Monitor privately:
 
 ```sql
-SELECT n.AppointmentId, a.BookingRequestId, p.DisplayName, n.Channel, n.State,
+SELECT n.AppointmentId, a.BookingRequestId, p.DisplayName, n.Channel, n.Kind, n.State,
     n.Attempts, n.LastError, n.ProviderMessageId, n.ClaimedAtUtc, n.NextAttemptAtUtc,
     a.Status AS AppointmentStatus, a.ReviewExpiresAtUtc
 FROM dbo.BookingNotifications n
@@ -86,7 +94,7 @@ WHERE n.State <> 'Accepted'
 ORDER BY n.NextAttemptAtUtc;
 ```
 
-After inspecting provider logs and proving a notification was **not accepted**, an administrator can reset that exact `(AppointmentId, Channel)` row to `State = 'Pending', Attempts = 0, ClaimId = NULL, ClaimedAtUtc = NULL, LastError = NULL, NextAttemptAtUtc = SYSUTCDATETIME()`. Keep the operation scoped to the inspected row. Do not reset `Accepted`, uncertain outcomes, or recently claimed `Sending` rows without reconciliation; doing so can duplicate messages. Expired or already-reviewed requests are skipped by dispatch and remain available in the login inbox when pending.
+After inspecting provider logs and proving a notification was **not accepted**, an administrator can reset that exact `(AppointmentId, Channel, Kind)` row to `State = 'Pending', Attempts = 0, ClaimId = NULL, ClaimedAtUtc = NULL, LastError = NULL, NextAttemptAtUtc = SYSUTCDATETIME()`. Keep the operation scoped to the inspected row. Do not reset `Accepted`, uncertain outcomes, or recently claimed `Sending` rows without reconciliation; doing so can duplicate messages. Expired or already-reviewed request notifications are skipped by dispatch; confirmation notifications are eligible while the appointment is confirmed and has not started.
 
 To set production contacts, update only the intended practitioner's `NotificationEmail` and E.164 `NotificationPhone` after verifying their ID/slug. Clear both test override settings when switching to production routing. These columns are not returned by public practitioner endpoints.
 

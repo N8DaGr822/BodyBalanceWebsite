@@ -1,5 +1,19 @@
 # Calendar and booking request API
 
+## Practitioner working hours and time off
+
+Apply `database/configure_api_availability_access.sql` using the database administrator before deploying availability editing. It grants writes to existing availability tables; there are no new tables or schema versions for this feature. In `/admin`, select a practitioner and expand **Manage availability**. Single-practitioner accounts see their own editor automatically.
+
+The authenticated endpoints are `GET /api/practitioner/{id}/availability`, `POST /api/practitioner/{id}/availability/hours`, `POST /api/practitioner/{id}/availability/time-off`, and `POST /api/practitioner/{id}/availability/time-off/{exceptionId}/remove`. All writes require `X-Booking-Review: 1` and the existing session/account authorization for that practitioner; private appointment review links do not grant schedule-editing access. All times use the practitioner's configured zone.
+
+Weekly hours accept `{ version, hours: [{ dayOfWeek, start: "09:00", end: "17:00" }] }`, with Sunday = 0 and up to three non-overlapping periods per day. The version from GET detects concurrent edits. Saving replaces recurring rules from the practitioner's current local date onward, preserving past rules, existing appointments, time off, and `Added` exceptions. The editor warns when dated rules will be replaced. An empty hours array removes recurring availability from today onward. Existing confirmed appointments are not cancelled by working-hour changes.
+
+Time off accepts `{ startDate: "2026-10-20", endDate: "2026-10-21", allDay: true }`, or `allDay: false` plus `startTime` and `endTime` in `HH:mm`. All-day ranges include both dates; timed ranges run continuously from the first date/time to the last date/time. Nonexistent and ambiguous DST boundaries are rejected. Saves use the same transaction-scoped practitioner lock as booking/approval and reject any confirmed appointment overlap, returning the conflicting local times. Identical time-off retries do not add duplicate blocks. Pending requests are retained, but approval rechecks the blocked schedule. Removing a block is idempotent and scoped to the authorized practitioner. Unknown save outcomes require refreshing the editor before further changes.
+
+Before production deployment, verify against a non-production SQL database: the permission script, two-account isolation, competing approval/time-off saves, stale hours versions, rollback on insert failure, identical time-off retries, and practitioner-local midnight/DST behavior. Unit tests cover validation and slot calculation; they do not execute SQL or send live email.
+
+Customer confirmation emails require `database/009_booking_confirmations.sql` before deploying this API. Approval through either the private link or practitioner inbox queues one email to the booking's customer address, containing practitioner, service, local date/time with UTC offset, approved location, and price. The existing Resend settings and notification test overrides apply. Replayed approvals reuse the existing outbox row. Delivery failures do not undo approval; the existing scheduled dispatch retries eligible pending confirmations while the appointment is confirmed and has not started. Declines and previously confirmed appointments do not generate new emails. SQL-script approvals queue the same email for scheduled dispatch.
+
 The .NET 10 isolated Azure Functions project serves public schedule data and accepts appointment requests. Customer contact details and email history stay on the backend. Public responses include the practitioner's published location description, never internal exception reasons or lists of appointments. Practitioners approve through a private notification link or their authorized account at `/practitioner`.
 
 | Endpoint | Result |
@@ -102,7 +116,7 @@ Each request transaction inserts one email and one SMS outbox row. Atomic claims
 
 Enable `.github/workflows/booking-notifications.yml` by setting the repository variable `BODYBALANCE_SITE_URL` to the connected site's HTTPS origin, and secret `BOOKING_NOTIFICATION_DISPATCH_KEY` to the backend's `NotificationDispatchKey`. This HTTP-only retry job handles up to two booking and two contact rows per run, with a nominal five-minute schedule; GitHub may delay or disable scheduled workflows on inactive repositories, so monitor it. Initial submission also dispatches its own two rows. The backup appointment inbox works independently of notifications.
 
-Use the private outbox queries in `database/README.md` to monitor failures. After correcting configuration, retry only notifications known not to have been accepted by the provider. Reconcile `Sending`/unknown outcomes with provider logs before resetting them; never blindly clear an `Accepted` row. Expired or reviewed requests are not dispatched. No background fire-and-forget work or paid timer/queue infrastructure is added.
+Use the private outbox queries in `database/README.md` to monitor failures. After correcting configuration, retry only notifications known not to have been accepted by the provider. Reconcile `Sending`/unknown outcomes with provider logs before resetting them; never blindly clear an `Accepted` row. Expired or reviewed request notifications are not dispatched; customer confirmations are dispatched only while confirmed and before the appointment starts. No background fire-and-forget work or paid timer/queue infrastructure is added.
 
 ## Local development
 

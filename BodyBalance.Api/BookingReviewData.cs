@@ -70,6 +70,10 @@ public sealed partial class ScheduleData
                 Price = CASE WHEN @status = 'Confirmed' THEN @price ELSE Price END,
                 Location = CASE WHEN @status = 'Confirmed' THEN @location ELSE Location END
             WHERE BookingRequestId = @requestId AND Status = 'Requested';
+            -- Confirmation Outbox: Commit the customer email with approval, once per appointment.
+            IF @status = 'Confirmed'
+                INSERT dbo.BookingNotifications(AppointmentId, Channel, Kind)
+                SELECT AppointmentId, 'Email', 'Confirmation' FROM dbo.Appointments WHERE BookingRequestId = @requestId;
             """, connection, transaction))
         {
             command.Parameters.Add("@requestId", SqlDbType.UniqueIdentifier).Value = decision.RequestId;

@@ -1,0 +1,234 @@
+@using System.Globalization
+@using System.Text.Json
+@implements IDisposable
+@inject HttpClient Http
+
+<details class="availability-editor">
+    <summary>Manage availability for @PractitionerName</summary>
+    @if (loading)
+    {
+        <p role="status">Loading availability...</p>
+    }
+    @if (!string.IsNullOrEmpty(error)) { <p class="calendar-notice" role="alert">@error</p> }
+    @if (!string.IsNullOrEmpty(message)) { <p class="calendar-notice" role="status">@message</p> }
+    @if (settings is not null)
+    {
+        <p>All dates and times use @settings.TimeZoneId.</p>
+        <fieldset disabled="@(busy || loading || needsRefresh)">
+            <legend>Weekly working hours</legend>
+            <p>Check the days you work. Saving replaces recurring hours from @settings.Today.ToString("MMM d, yyyy") onward. Existing appointments, time off, and separately added availability stay in place.</p>
+            @if (settings.Rules.Any(r => r.EffectiveFrom > settings.Today || r.EffectiveThrough is not null))
+            {
+                <p class="calendar-notice">Your schedule includes dated rules. The form shows today's rules; saving replaces future recurring rules too.</p>
+                <ul>
+                    @foreach (var rule in settings.Rules)
+                    {
+                        <li>@((DayOfWeek)rule.DayOfWeek): @FormatTime(rule.StartTimeLocal) – @FormatTime(rule.EndTimeLocal), @rule.EffectiveFrom.ToString("MMM d, yyyy") through @(rule.EffectiveThrough?.ToString("MMM d, yyyy") ?? "ongoing")</li>
+                    }
+                </ul>
+            }
+            @foreach (var day in days)
+            {
+                <div class="working-day">
+                    <label><input type="checkbox" @bind="day.Enabled" /> @((DayOfWeek)day.Day)</label>
+                    @if (day.Enabled)
+                    {
+                        @foreach (var period in day.Periods)
+                        {
+                            <div class="working-period" @key="period">
+                                <label>Start <input type="time" value="@period.Start" @onchange="e => period.Start = e.Value?.ToString() ?? string.Empty" /></label>
+                                <label>End <input type="time" value="@period.End" @onchange="e => period.End = e.Value?.ToString() ?? string.Empty" /></label>
+                                @if (day.Periods.Count > 1)
+                                {
+                                    <button type="button" class="btn btn-cream" @onclick="() => day.Periods.Remove(period)">Remove period</button>
+                                }
+                            </div>
+                        }
+                        @if (day.Periods.Count < 3)
+                        {
+                            <button type="button" class="btn btn-cream" @onclick='() => day.Periods.Add(new Period { Start = "13:00", End = "17:00" })'>Add working period</button>
+                        }
+                    }
+                    else { <span>Not working</span> }
+                </div>
+            }
+            <button type="button" class="btn btn-navy" @onclick="SaveHoursAsync">Save weekly hours</button>
+        </fieldset>
+        <fieldset disabled="@(busy || loading || needsRefresh)">
+            <legend>Time off</legend>
+            <p>Block a whole day, a date range, or specific hours. Time off cannot overlap a confirmed appointment. Pending requests remain for review, but blocked times cannot be approved.</p>
+            <div class="working-period">
+                <label>First day <input type="date" @bind="startDate" min="@settings.Today.ToString("yyyy-MM-dd")" max="2100-12-31" /></label>
+                <label>Last day <input type="date" @bind="endDate" min="@settings.Today.ToString("yyyy-MM-dd")" max="2100-12-31" /></label>
+                <label><input type="checkbox" @bind="allDay" /> All day (includes the last day)</label>
+            </div>
+            @if (!allDay)
+            {
+                <div class="working-period">
+                    <label>Start time on first day <input type="time" value="@startTime" @onchange="e => startTime = e.Value?.ToString() ?? string.Empty" /></label>
+                    <label>End time on last day <input type="time" value="@endTime" @onchange="e => endTime = e.Value?.ToString() ?? string.Empty" /></label>
+                </div>
+            }
+            <button type="button" class="btn btn-navy" @onclick="AddTimeOffAsync">Add time off</button>
+            <h3>Upcoming time off</h3>
+            @if (settings.TimeOff.Length == 0) { <p>No upcoming time off.</p> }
+            @foreach (var entry in settings.TimeOff)
+            {
+                <div class="time-off-entry" @key="entry.Id">
+                    <span>@LocalTime(entry.StartAtUtc).ToString("MMM d, yyyy h:mm tt") – @LocalTime(entry.EndAtUtc).ToString("MMM d, yyyy h:mm tt")</span>
+                    @if (removeId == entry.Id)
+                    {
+                        <span>Remove this time off and reopen these hours?</span>
+                        <button type="button" class="btn btn-navy" @onclick="() => RemoveTimeOffAsync(entry.Id)">Confirm removal</button>
+                        <button type="button" class="btn btn-cream" @onclick="() => removeId = null">Keep time off</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-cream" @onclick="() => removeId = entry.Id">Remove time off</button>
+                    }
+                </div>
+            }
+        </fieldset>
+    }
+    <button type="button" class="btn btn-cream" disabled="@(busy || loading)" @onclick="RefreshAsync">Refresh availability (discard edits)</button>
+</details>
+
+@code {
+    [Parameter, EditorRequired] public string ApiBaseUrl { get; set; } = "";
+    [Parameter] public int PractitionerId { get; set; }
+    [Parameter] public string PractitionerName { get; set; } = "";
+    private readonly CancellationTokenSource cancellation = new();
+    private Settings? settings;
+    private DayHours[] days = [];
+    private string? hoursVersion;
+    private DateTime startDate;
+    private DateTime endDate;
+    private bool allDay = true;
+    private string startTime = "09:00";
+    private string endTime = "17:00";
+    private int? removeId;
+    private bool loading = true;
+    private bool busy;
+    private bool disposed;
+    private bool needsRefresh;
+    private string? error;
+    private string? message;
+    private string Endpoint => $"{ApiBaseUrl.TrimEnd('/')}/practitioner/{PractitionerId}/availability";
+
+    protected override Task OnInitializedAsync() => RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        error = null;
+        message = null;
+        await LoadAsync(true);
+    }
+
+    private async Task LoadAsync(bool resetHours)
+    {
+        loading = true;
+        try
+        {
+            using var response = await Http.GetAsync(Endpoint, cancellation.Token);
+            if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            {
+                needsRefresh = true;
+                error = "Sign in with access to this practitioner to manage availability.";
+                return;
+            }
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<Settings>(cancellation.Token) ?? throw new JsonException();
+            if (disposed) return;
+            settings = result;
+            if (resetHours)
+            {
+                hoursVersion = result.Version;
+                days = Enumerable.Range(0, 7).Select(day =>
+                {
+                    var periods = result.Rules.Where(r => r.DayOfWeek == day && r.EffectiveFrom <= result.Today)
+                        .Select(r => new Period { Start = FormatTime(r.StartTimeLocal), End = FormatTime(r.EndTimeLocal) }).ToList();
+                    return new DayHours { Day = day, Enabled = periods.Count > 0, Periods = periods.Count > 0 ? periods : [new()] };
+                }).ToArray();
+                startDate = endDate = result.Today;
+            }
+            needsRefresh = false;
+            removeId = null;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed)
+            {
+                needsRefresh = true;
+                error = "We couldn't refresh availability. Refresh before making further changes.";
+            }
+        }
+        finally { loading = false; }
+    }
+
+    private Task SaveHoursAsync() => SaveAsync("hours", new
+    {
+        Version = hoursVersion,
+        Hours = days.Where(d => d.Enabled).SelectMany(d => d.Periods.Select(p => new { DayOfWeek = d.Day, p.Start, p.End })).ToArray()
+    }, "Weekly hours saved. Existing appointments and time off are unchanged.", true);
+
+    private Task AddTimeOffAsync() => SaveAsync("time-off", new
+    {
+        StartDate = startDate, EndDate = endDate, AllDay = allDay, StartTime = startTime, EndTime = endTime
+    }, "Time off saved. These hours are no longer available for booking.", false);
+
+    private Task RemoveTimeOffAsync(int id) => SaveAsync($"time-off/{id}/remove", new { },
+        "Time off removed. Availability follows your working hours and any remaining blocks.", false);
+
+    private async Task SaveAsync(string path, object body, string success, bool resetHours)
+    {
+        if (busy || loading || needsRefresh) return;
+        busy = true;
+        error = null;
+        message = null;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{Endpoint}/{path}");
+            request.Headers.Add("X-Booking-Review", "1");
+            request.Content = JsonContent.Create(body);
+            using var response = await Http.SendAsync(request, cancellation.Token);
+            if (disposed) return;
+            if (response.IsSuccessStatusCode)
+            {
+                message = success;
+                await LoadAsync(resetHours);
+            }
+            else if (response.StatusCode is System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.Conflict)
+                error = (await response.Content.ReadFromJsonAsync<ApiError>(cancellation.Token))?.Error ?? "Check your availability details.";
+            else
+            {
+                needsRefresh = true;
+                error = response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden
+                    ? "Your session expired or you no longer have access. Sign in again."
+                    : "We couldn't verify whether the change was saved. Refresh availability before trying again.";
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed)
+            {
+                needsRefresh = true;
+                error = "We couldn't verify whether the change was saved. Refresh availability before trying again.";
+            }
+        }
+        finally { busy = false; }
+    }
+
+    private DateTime LocalTime(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value,
+        TimeZoneInfo.FindSystemTimeZoneById(settings!.TimeZoneId == "Central Standard Time" ? "America/Chicago" : settings.TimeZoneId)).DateTime;
+    private static string FormatTime(TimeSpan value) => value.ToString(@"hh\:mm", CultureInfo.InvariantCulture);
+    // Component Lifetime: The parent keys this editor by practitioner; switching cancels requests and discards that editor's drafts.
+    public void Dispose() { disposed = true; cancellation.Cancel(); cancellation.Dispose(); }
+    private sealed class DayHours { public int Day { get; set; } public bool Enabled { get; set; } public List<Period> Periods { get; set; } = []; }
+    private sealed class Period { public string Start { get; set; } = "09:00"; public string End { get; set; } = "17:00"; }
+    private sealed record Rule(int DayOfWeek, TimeSpan StartTimeLocal, TimeSpan EndTimeLocal, DateTime EffectiveFrom, DateTime? EffectiveThrough);
+    private sealed record TimeOff(int Id, DateTimeOffset StartAtUtc, DateTimeOffset EndAtUtc);
+    private sealed record Settings(string TimeZoneId, DateTime Today, string Version, Rule[] Rules, TimeOff[] TimeOff);
+    private sealed record ApiError(string Error);
+}

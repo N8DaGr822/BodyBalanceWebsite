@@ -12,7 +12,7 @@
 <PageTitle>Admin Appointments | Entwined &amp; Unwind</PageTitle>
 <HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
 
-<section class="page-hero"><div class="container"><h1>Appointment Admin</h1><p>Approve requests and view your weekly schedule.</p></div></section>
+<section class="page-hero"><div class="container"><h1>Appointment Admin</h1><p>Approve requests, manage availability, and view your weekly schedule.</p></div></section>
 <section class="content-section"><div class="container session-calendar">
     @if (loading)
     {
@@ -59,6 +59,19 @@
                     }
                 </select>
             </div>
+            <h2>Working hours &amp; time off</h2>
+            @if (practitionerId != 0)
+            {
+                <PractitionerAvailabilityEditor @key="practitionerId" ApiBaseUrl="@apiBaseUrl" PractitionerId="practitionerId" PractitionerName="@PractitionerName(practitionerId)" />
+            }
+            else if (inbox.Practitioners.Length == 1)
+            {
+                <PractitionerAvailabilityEditor @key="inbox.Practitioners[0].PractitionerId" ApiBaseUrl="@apiBaseUrl" PractitionerId="inbox.Practitioners[0].PractitionerId" PractitionerName="@inbox.Practitioners[0].DisplayName" />
+            }
+            else
+            {
+                <p>Select a practitioner above to manage their working hours and time off.</p>
+            }
             <h2>Pending requests</h2>
             <p>Review the price and address before approving. Pending requests do not reserve a time.</p>
             @foreach (var person in inbox.Practitioners)

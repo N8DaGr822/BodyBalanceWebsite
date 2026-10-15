@@ -1,0 +1,58 @@
+.availability-editor {
+    margin-bottom: 2rem;
+}
+
+summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 1rem 0;
+}
+
+fieldset {
+    border: 1px solid var(--navy);
+    border-radius: .5rem;
+    padding: 1rem;
+    margin: 1rem 0;
+    min-width: 0;
+}
+
+legend {
+    float: none;
+    width: auto;
+    padding: 0 .5rem;
+    font-size: 1.25rem;
+}
+
+.working-day, .time-off-entry {
+    padding: .75rem 0;
+    border-bottom: 1px solid var(--cream);
+    margin-bottom: .5rem;
+}
+
+.working-day > label {
+    display: inline-block;
+    min-width: 9rem;
+    font-weight: 600;
+}
+
+.working-period, .time-off-entry {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+    align-items: center;
+}
+
+.working-period {
+    margin: .5rem 0;
+}
+
+input[type="date"], input[type="time"] {
+    border: 1px solid var(--navy);
+    border-radius: .25rem;
+    padding: .4rem;
+    max-width: 100%;
+}
+
+input[type="checkbox"] {
+    margin-right: .35rem;
+}
