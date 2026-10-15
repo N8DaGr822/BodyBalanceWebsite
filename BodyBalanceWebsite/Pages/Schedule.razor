@@ -130,13 +130,6 @@
                         OffersFirstVisitPrice="@(services.First(s => s.ServiceId == serviceId).FirstTimeClientPrice is not null)" />
                 }
             </div>
-            @if (practitioners.FirstOrDefault(p => p.PractitionerId == practitionerId)?.DisplayName == "Mary")
-            {
-                <div class="calendar-windows">
-                    <h3>Available hours</h3>
-                    <p>Tuesday &ndash; Saturday, 10 AM &ndash; 6 PM Central Time.</p>
-                </div>
-            }
         </div>
     </div>
 </section>
