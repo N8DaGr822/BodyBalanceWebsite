@@ -82,6 +82,28 @@ public sealed partial class ScheduleFunctions
             return await DecideAndNotifyAsync(request, decision, cancellationToken, practitionerId);
         }, cancellationToken);
 
+    [Function("PractitionerReschedule")]
+    public Task<HttpResponseData> PractitionerReschedule(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "practitioner/requests/{id:guid}/reschedule")] HttpRequestData request,
+        Guid id, CancellationToken cancellationToken) => ExecuteAsync(request, async () =>
+        {
+            var practitionerId = await AuthorizedPractitionerAsync(request, id, cancellationToken);
+            if (practitionerId is null) return await ReviewResponseAsync(request, null);
+            var change = await ReadReviewBodyAsync<BookingTimeChange>(request, cancellationToken);
+            var details = await data.RescheduleBookingAsync(id, change, practitionerId.Value, cancellationToken);
+            if (details is not null)
+            {
+                try { await notifications.DispatchAsync(id, cancellationToken); }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (Exception exception)
+                {
+                    // Saved Adjustment: A delivery failure leaves the committed update and durable email intact.
+                    logger.LogError(exception, "Updated appointment notification dispatch failed for request {RequestId}; inspect the outbox.", id);
+                }
+            }
+            return await ReviewResponseAsync(request, details);
+        }, cancellationToken);
+
     [Function("DispatchBookingNotifications")]
     public Task<HttpResponseData> DispatchBookingNotifications(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "booking-notifications/dispatch")] HttpRequestData request,

@@ -100,7 +100,7 @@ public sealed partial class ScheduleData
         using var command = new SqlCommand("""
             SELECT a.PractitionerId, a.ServiceId, a.CreatedAtUtc, p.DisplayName, a.CustomerName,
                 a.CustomerEmail, a.CustomerPhone, a.ServiceName, a.StartAtUtc, a.EndAtUtc,
-                a.TimeZoneId, a.Price, a.CurrencyCode, a.Location, a.IsFirstVisitRequested, a.Status
+                a.TimeZoneId, a.Price, a.CurrencyCode, a.Location, a.IsFirstVisitRequested, a.Status, a.ScheduleRevision
             FROM dbo.Appointments a JOIN dbo.Practitioners p ON p.PractitionerId = a.PractitionerId
             WHERE a.BookingRequestId = @requestId
                 AND (a.PractitionerId = @authorizedPractitionerId
@@ -116,7 +116,7 @@ public sealed partial class ScheduleData
                 reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetString(7),
                 DateTime.SpecifyKind(reader.GetDateTime(8), DateTimeKind.Utc),
                 DateTime.SpecifyKind(reader.GetDateTime(9), DateTimeKind.Utc), reader.GetString(10),
-                reader.GetDecimal(11), reader.GetString(12), reader.GetString(13), reader.GetBoolean(14), reader.GetString(15)));
+                reader.GetDecimal(11), reader.GetString(12), reader.GetString(13), reader.GetBoolean(14), reader.GetString(15), reader.GetInt32(16)));
     }
 
     private sealed record ReviewRow(int PractitionerId, int ServiceId, DateTime CreatedAtUtc, BookingReviewDetails Details);

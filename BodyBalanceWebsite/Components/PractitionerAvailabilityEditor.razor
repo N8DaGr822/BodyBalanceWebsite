@@ -30,8 +30,8 @@
                         @foreach (var period in day.Periods)
                         {
                             <div class="working-period" @key="period">
-                                <label>Start <input type="time" value="@period.Start" @onchange="e => period.Start = e.Value?.ToString() ?? string.Empty" /></label>
-                                <label>End <input type="time" value="@period.End" @onchange="e => period.End = e.Value?.ToString() ?? string.Empty" /></label>
+                                <div>Start <TimeOfDayInput Label="Start time" @bind-Value="period.Start" /></div>
+                                <div>End <TimeOfDayInput Label="End time" @bind-Value="period.End" /></div>
                                 @if (day.Periods.Count > 1)
                                 {
                                     <button type="button" class="btn btn-cream" @onclick="() => day.Periods.Remove(period)">Remove</button>
@@ -59,8 +59,8 @@
             @if (!allDay)
             {
                 <div class="working-period">
-                    <label>Start time on first day <input type="time" value="@startTime" @onchange="e => startTime = e.Value?.ToString() ?? string.Empty" /></label>
-                    <label>End time on last day <input type="time" value="@endTime" @onchange="e => endTime = e.Value?.ToString() ?? string.Empty" /></label>
+                    <div>Start time on first day <TimeOfDayInput Label="Start time on first day" @bind-Value="startTime" /></div>
+                    <div>End time on last day <TimeOfDayInput Label="End time on last day" @bind-Value="endTime" /></div>
                 </div>
             }
             <button type="button" class="btn btn-navy" @onclick="AddTimeOffAsync">Add time off</button>

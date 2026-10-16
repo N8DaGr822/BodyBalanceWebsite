@@ -8,6 +8,52 @@ namespace BodyBalance.Api.Tests;
 public class BookingReviewTests
 {
     [Theory]
+    [InlineData(1, 18)]
+    [InlineData(7, 17)]
+    public void AppointmentChangesUseTheAppointmentZoneRatherThanBrowserZone(int month, int utcHour)
+    {
+        var local = new DateTime(2027, month, 15, 12, 0, 0, DateTimeKind.Unspecified);
+        Assert.Equal(new DateTime(2027, month, 15, utcHour, 0, 0, DateTimeKind.Utc),
+            BookingReview.ChangedStartUtc(new(local, 0), "America/Chicago"));
+    }
+
+    [Theory]
+    [InlineData(2027, 3, 14, 2, 30)]
+    [InlineData(2027, 11, 7, 1, 30)]
+    [InlineData(1999, 1, 1, 12, 0)]
+    [InlineData(2101, 1, 1, 12, 0)]
+    public void AppointmentChangesRejectInvalidOrAmbiguousLocalTimes(int year, int month, int day, int hour, int minute)
+        => Assert.Throws<BookingException>(() => BookingReview.ChangedStartUtc(
+            new(new DateTime(year, month, day, hour, minute, 0), 0), "America/Chicago"));
+
+    [Fact]
+    public void AppointmentChangesRejectMissingDateNegativeRevisionAndPartialMinutes()
+    {
+        Assert.Throws<BookingException>(() => BookingReview.ChangedStartUtc(new(default, 0), "America/Chicago"));
+        Assert.Throws<BookingException>(() => BookingReview.ChangedStartUtc(new(new(2027, 1, 15), -1), "America/Chicago"));
+        Assert.Throws<BookingException>(() => BookingReview.ChangedStartUtc(new(new(2027, 1, 15, 12, 0, 1), 0), "America/Chicago"));
+    }
+
+    [Fact]
+    public void UpdatedConfirmationIncludesNewTimeAndUsesADistinctKeyForEachChange()
+    {
+        var start = new DateTime(2027, 7, 15, 18, 0, 0, DateTimeKind.Utc);
+        var details = new BookingReviewDetails(Guid.NewGuid(), "Mary", "Alex", "customer@example.com", null,
+            "Reiki", start, start.AddMinutes(30), "America/Chicago", 44m, "USD", "Studio", false, "Confirmed", 1);
+        var message = BookingReview.RescheduledMessage(details);
+        Assert.Equal(details.CustomerEmail, message.Recipient);
+        Assert.Contains("updated", message.Subject);
+        Assert.Contains("updated your appointment date and time", message.EmailText);
+        Assert.Contains("1:00 PM - 1:30 PM", message.EmailText);
+        Assert.Contains("UTC-05:00", message.EmailText);
+        Assert.Contains("44.00 USD", message.EmailText);
+        Assert.Contains("Studio", message.EmailText);
+        Assert.DoesNotContain("review-request", message.EmailText);
+        Assert.Equal(message.IdempotencyKey, BookingReview.RescheduledMessage(details).IdempotencyKey);
+        Assert.NotEqual(message.IdempotencyKey, BookingReview.RescheduledMessage(details with { ScheduleRevision = 2 }).IdempotencyKey);
+    }
+
+    [Theory]
     [InlineData("Confirmed", "Cancelled", true, true)]
     [InlineData("Confirmed", "Cancelled", false, false)]
     [InlineData("Completed", "Cancelled", true, false)]

@@ -74,14 +74,41 @@ public class NotificationSenderTests
         Assert.Equal("Accepted", (await new NotificationSender(http, config).SendAsync(notification, default)).State);
     }
 
-    [Fact]
-    public async Task ConfirmationWithoutDetailsDoesNotSendPractitionerReviewLink()
+    [Theory]
+    [InlineData("Confirmation")]
+    [InlineData("Rescheduled")]
+    public async Task ConfirmationWithoutDetailsDoesNotSendPractitionerReviewLink(string kind)
     {
         using var http = new HttpClient(new Handler(_ => throw new InvalidOperationException("Must not send")));
         var result = await new NotificationSender(http, Config()).SendAsync(
-            Notification("Email") with { Kind = "Confirmation" }, default);
+            Notification("Email") with { Kind = kind }, default);
         Assert.Equal("NeedsReview", result.State);
         Assert.Equal("ConfirmationDetailsMissing", result.Error);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("tester@example.com")]
+    public async Task RescheduledEmailUsesCustomerSnapshotAndRevisionKey(string? testEmail)
+    {
+        var config = Config();
+        config["NotificationTestEmail"] = testEmail;
+        config["BookingReviewSigningKey"] = null;
+        var start = new DateTime(2027, 7, 15, 18, 0, 0, DateTimeKind.Utc);
+        var details = new BookingReviewDetails(Guid.NewGuid(), "Mary", "Alex", "customer@example.com", null,
+            "Reiki", start, start.AddMinutes(30), "America/Chicago", 44m, "USD", "Studio", false, "Confirmed", 2);
+        var message = BookingReview.RescheduledMessage(details);
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            Assert.Equal(testEmail ?? details.CustomerEmail, json.RootElement.GetProperty("to")[0].GetString());
+            Assert.Equal(message.EmailText, json.RootElement.GetProperty("text").GetString());
+            Assert.Equal(message.Subject, json.RootElement.GetProperty("subject").GetString());
+            Assert.Equal(message.IdempotencyKey, request.Headers.GetValues("Idempotency-Key").Single());
+            return new(HttpStatusCode.OK) { Content = new StringContent("{\"id\":\"rescheduled-email\"}") };
+        }));
+        var notification = Notification("Email") with { Kind = "Rescheduled", Confirmation = message, Revision = 2 };
+        Assert.Equal("Accepted", (await new NotificationSender(http, config).SendAsync(notification, default)).State);
     }
 
     [Fact]

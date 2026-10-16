@@ -113,7 +113,7 @@
             @if (availabilityError is not null) { <p class="calendar-notice" role="alert">@availabilityError</p> }
             <div class="calendar-grid" role="region" aria-labelledby="admin-week" tabindex="0">
                 <CalendarContainer @key="(week, appointments)" FirstDate="week" DisplayedView="DisplayedView.Weekly" TasksList="appointments" Draggable="false">
-                    <WeekView WeekDaysColor="var(--cream-pale)" SaturdayColor="var(--cream)" SundayColor="var(--cream)"
+                    <BodyBalanceWebsite.Components.Calendar.StandardWeekView WeekDaysColor="var(--cream-pale)" SaturdayColor="var(--cream)" SundayColor="var(--cream)"
                               HeaderStyle="background:var(--navy);color:var(--text-on-navy)" Draggable="false" TaskClick="OpenAppointment" />
                 </CalendarContainer>
             </div>

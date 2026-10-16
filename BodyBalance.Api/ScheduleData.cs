@@ -61,7 +61,8 @@ public sealed partial class ScheduleData(IConfiguration configuration, TokenCred
     }
 
     private static async Task<List<TimeWindow>> GetAvailabilityAsync(Practitioner practitioner, DateTime month,
-        SqlConnection connection, SqlTransaction? transaction, DateTime nowUtc, CancellationToken cancellationToken)
+        SqlConnection connection, SqlTransaction? transaction, DateTime nowUtc, CancellationToken cancellationToken,
+        Guid? excludedRequestId = null)
     {
         var zone = TimeZoneInfo.FindSystemTimeZoneById(practitioner.TimeZoneId);
         var start = Availability.ToUtc(month, zone);
@@ -77,9 +78,11 @@ public sealed partial class ScheduleData(IConfiguration configuration, TokenCred
 
             SELECT StartAtUtc, EndAtUtc FROM dbo.Appointments
             WHERE PractitionerId = @id AND StartAtUtc < @end AND EndAtUtc > @start
+                AND (@excludedRequestId IS NULL OR BookingRequestId IS NULL OR BookingRequestId <> @excludedRequestId)
                 AND Status IN ('Confirmed', 'Completed', 'NoShow');
             """, connection, transaction);
         command.Parameters.Add("@id", SqlDbType.Int).Value = practitioner.PractitionerId;
+        command.Parameters.Add("@excludedRequestId", SqlDbType.UniqueIdentifier).Value = (object?)excludedRequestId ?? DBNull.Value;
         command.Parameters.Add("@monthStart", SqlDbType.Date).Value = month;
         command.Parameters.Add("@monthEnd", SqlDbType.Date).Value = month.AddMonths(1);
         command.Parameters.Add("@start", SqlDbType.DateTime2).Value = start;

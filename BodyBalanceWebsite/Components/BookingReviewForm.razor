@@ -19,7 +19,7 @@
         <dt>Client</dt><dd>@details.CustomerName</dd>
         <dt>Email</dt><dd>@details.CustomerEmail</dd>
         <dt>Phone</dt><dd>@(details.CustomerPhone ?? "Not provided")</dd>
-        <dt>Requested time</dt><dd>@LocalTime(details.StartAtUtc).ToString("dddd, MMMM d, yyyy 'at' h:mm tt") &ndash; @LocalTime(details.EndAtUtc).ToString("h:mm tt") (@details.TimeZoneId)</dd>
+        <dt>Appointment time</dt><dd>@LocalTime(details.StartAtUtc).ToString("dddd, MMMM d, yyyy 'at' h:mm tt") &ndash; @LocalTime(details.EndAtUtc).ToString("h:mm tt") (@details.TimeZoneId)</dd>
         <dt>First visit with you</dt><dd>@(details.IsFirstVisitRequested ? "Client requested first-visit pricing; please verify eligibility." : "Not requested")</dd>
         <dt>Status</dt><dd>@(details.Status == "Cancelled" ? "Declined / cancelled" : details.Status)</dd>
     </dl>
@@ -62,7 +62,28 @@
         <p>@details.Price.ToString("0.00", CultureInfo.InvariantCulture) @details.CurrencyCode &middot; @details.Location</p>
         @if (details.Status == "Confirmed" && Token is null)
         {
-            @if (confirmCancellation || retryStatus == "Cancelled")
+            @if (editingTime)
+            {
+                <EditForm Model="timeModel" OnValidSubmit="RescheduleAsync" class="booking-form">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+                    <fieldset disabled="@(submitting || retryTimeChange)">
+                        <legend>Adjust appointment date and time</legend>
+                        <label for="appointment-start">New date (@details.TimeZoneId)</label>
+                        <InputDate id="appointment-start" @bind-Value="timeModel.StartLocal" />
+                        <div>New start time <TimeOfDayInput Label="New appointment start time" @bind-Value="timeModel.StartTime" /></div>
+                        <p>The session length stays the same. Choose a time within working hours. An updated confirmation will be emailed to @details.CustomerEmail.</p>
+                    </fieldset>
+                    <div class="calendar-navigation">
+                        <button type="submit" class="btn btn-navy" disabled="@submitting">@(submitting ? "Saving..." : retryTimeChange ? "Retry the same change" : "Save time and email customer")</button>
+                        @if (!retryTimeChange)
+                        {
+                            <button type="button" class="btn btn-cream" disabled="@submitting" @onclick="() => editingTime = false">Keep current time</button>
+                        }
+                    </div>
+                </EditForm>
+            }
+            else if (confirmCancellation || retryStatus == "Cancelled")
             {
                 <div class="calendar-notice" role="alert">
                     <p>Cancel this appointment for @details.CustomerName? This releases the time and queues a cancellation email to @details.CustomerEmail.</p>
@@ -75,6 +96,7 @@
             }
             else
             {
+                <button type="button" class="btn btn-navy" disabled="@submitting" @onclick="BeginTimeEdit">Adjust date and time</button>
                 <button type="button" class="btn btn-cream" disabled="@submitting" @onclick="() => confirmCancellation = true">Cancel appointment and email customer</button>
             }
         }
@@ -95,10 +117,13 @@
 
     private readonly CancellationTokenSource cancellation = new();
     private readonly ReviewFields model = new();
+    private readonly TimeFields timeModel = new();
     private ReviewDetails? details;
     private bool loading = true;
     private bool submitting;
     private bool confirmCancellation;
+    private bool editingTime;
+    private bool retryTimeChange;
     private bool disposed;
     private string? error;
     private string? retryStatus;
@@ -131,6 +156,8 @@
             model.Location = details.Location;
             model.Verified = false;
             confirmCancellation = false;
+            editingTime = false;
+            retryTimeChange = false;
             retryStatus = null;
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
@@ -142,6 +169,58 @@
     }
 
     private Task ApproveAsync() => model.Verified ? DecideAsync(true) : Task.CompletedTask;
+
+    private void BeginTimeEdit()
+    {
+        timeModel.StartLocal = LocalTime(details!.StartAtUtc);
+        timeModel.StartTime = timeModel.StartLocal.Value.ToString("HH:mm", CultureInfo.InvariantCulture);
+        editingTime = true;
+        error = null;
+    }
+
+    private async Task RescheduleAsync()
+    {
+        if (submitting || details?.Status != "Confirmed" || Token is not null || timeModel.StartLocal is null) return;
+        submitting = true;
+        error = null;
+        try
+        {
+            using var response = await PostAsync("reschedule", new { StartLocal = timeModel.StartLocal.Value.Date
+                .Add(TimeSpan.ParseExact(timeModel.StartTime, @"hh\:mm", CultureInfo.InvariantCulture)),
+                ExpectedRevision = details.ScheduleRevision });
+            if (disposed) return;
+            if (response.IsSuccessStatusCode)
+            {
+                details = await response.Content.ReadFromJsonAsync<ReviewDetails>(cancellation.Token)
+                    ?? throw new JsonException("Missing updated appointment.");
+                editingTime = false;
+                retryTimeChange = false;
+            }
+            else if (response.StatusCode is System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.Conflict or System.Net.HttpStatusCode.NotFound)
+            {
+                error = (await response.Content.ReadFromJsonAsync<ApiError>(cancellation.Token))?.Error ?? "This appointment could not be updated.";
+                retryTimeChange = false;
+            }
+            else if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            {
+                error = "Your session expired. Sign in again to adjust this appointment.";
+                retryTimeChange = false;
+            }
+            else SetTimeUnknown();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if (!disposed) SetTimeUnknown();
+        }
+        finally { submitting = false; }
+    }
+
+    private void SetTimeUnknown()
+    {
+        retryTimeChange = true;
+        error = "We couldn't confirm whether the new time was saved. Retry the same change or refresh its status.";
+    }
 
     private async Task DecideAsync(bool approve)
     {
@@ -206,8 +285,13 @@
         [Required, StringLength(500)] public string Location { get; set; } = "";
         public bool Verified { get; set; }
     }
+    private sealed class TimeFields
+    {
+        [Required] public DateTime? StartLocal { get; set; }
+        public string StartTime { get; set; } = "00:00";
+    }
     private sealed record ReviewDetails(Guid RequestId, string PractitionerName, string CustomerName,
         string CustomerEmail, string? CustomerPhone, string ServiceName, DateTimeOffset StartAtUtc, DateTimeOffset EndAtUtc,
-        string TimeZoneId, decimal Price, string CurrencyCode, string Location, bool IsFirstVisitRequested, string Status);
+        string TimeZoneId, decimal Price, string CurrencyCode, string Location, bool IsFirstVisitRequested, string Status, int ScheduleRevision);
     private sealed record ApiError(string Error);
 }

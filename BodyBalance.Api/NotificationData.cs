@@ -1,10 +1,12 @@
 using System.Data;
+using System.Text.Json;
 using Microsoft.Data.SqlClient;
 
 namespace BodyBalance.Api;
 
 public sealed record BookingNotification(long AppointmentId, Guid RequestId, int PractitionerId, string Channel,
-    string? Recipient, Guid ClaimId, int Attempts, byte[] ReviewTokenHash, string Kind = "Request", NotificationMessage? Confirmation = null);
+    string? Recipient, Guid ClaimId, int Attempts, byte[] ReviewTokenHash, string Kind = "Request", NotificationMessage? Confirmation = null,
+    int Revision = 0);
 
 public sealed partial class ScheduleData
 {
@@ -21,12 +23,15 @@ public sealed partial class ScheduleData
                 WHERE n.State = 'Pending' AND n.Attempts < 5 AND n.NextAttemptAtUtc <= CAST(SYSUTCDATETIME() AS datetime2(0))
                     AND ((n.Kind = 'Request' AND a.Status = 'Requested' AND a.ReviewExpiresAtUtc > SYSUTCDATETIME())
                         OR (n.Kind = 'Confirmation' AND a.Status = 'Confirmed' AND a.StartAtUtc > SYSUTCDATETIME())
+                        OR (n.Kind = 'Rescheduled' AND a.Status = 'Confirmed' AND a.StartAtUtc > SYSUTCDATETIME()
+                            AND n.Revision = a.ScheduleRevision)
                         OR (n.Kind = 'Cancellation' AND a.Status = 'Cancelled'))
                     AND (@requestId IS NULL OR a.BookingRequestId = @requestId)
                 ORDER BY n.NextAttemptAtUtc, n.AppointmentId, n.Channel
             )
             UPDATE candidate SET State = 'Sending', ClaimId = NEWID(), ClaimedAtUtc = SYSUTCDATETIME(), Attempts = Attempts + 1
-                OUTPUT inserted.AppointmentId, inserted.Channel, inserted.ClaimId, inserted.Attempts, inserted.Kind;
+                OUTPUT inserted.AppointmentId, inserted.Channel, inserted.ClaimId, inserted.Attempts, inserted.Kind,
+                    inserted.Revision, inserted.MessageJson;
             """, connection);
         command.Parameters.Add("@requestId", SqlDbType.UniqueIdentifier).Value = (object?)requestId ?? DBNull.Value;
         long appointmentId;
@@ -34,6 +39,8 @@ public sealed partial class ScheduleData
         Guid claimId;
         int attempts;
         string kind;
+        int revision;
+        string? messageJson;
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
             if (!await reader.ReadAsync(cancellationToken)) return null;
@@ -42,6 +49,8 @@ public sealed partial class ScheduleData
             claimId = reader.GetGuid(2);
             attempts = reader.GetInt32(3);
             kind = reader.GetString(4);
+            revision = reader.GetInt32(5);
+            messageJson = reader.IsDBNull(6) ? null : reader.GetString(6);
         }
         using var details = new SqlCommand("""
             SELECT a.BookingRequestId, a.PractitionerId, p.NotificationEmail, p.NotificationPhone, a.ReviewTokenHash,
@@ -54,7 +63,8 @@ public sealed partial class ScheduleData
         await using var result = await details.ExecuteReaderAsync(cancellationToken);
         if (!await result.ReadAsync(cancellationToken)) return null;
         var recipientColumn = channel == "Email" ? 2 : 3;
-        NotificationMessage? confirmation = null;
+        NotificationMessage? confirmation = kind == "Rescheduled" && messageJson is not null
+            ? JsonSerializer.Deserialize<NotificationMessage>(messageJson) : null;
         if (kind is "Confirmation" or "Cancellation")
         {
             var confirmationDetails = new BookingReviewDetails(result.GetGuid(0), result.GetString(5), result.GetString(6),
@@ -67,7 +77,7 @@ public sealed partial class ScheduleData
         }
         return new(appointmentId, result.GetGuid(0), result.GetInt32(1), channel,
             result.IsDBNull(recipientColumn) ? null : result.GetString(recipientColumn), claimId, attempts,
-            result.IsDBNull(4) ? [] : (byte[])result[4], kind, confirmation);
+            result.IsDBNull(4) ? [] : (byte[])result[4], kind, confirmation, revision);
     }
 
     public async Task FinishNotificationAsync(BookingNotification notification, NotificationResult result, CancellationToken cancellationToken)
@@ -77,11 +87,13 @@ public sealed partial class ScheduleData
             UPDATE dbo.BookingNotifications SET State = @state, ProviderMessageId = @providerId,
                 LastError = @error, AcceptedAtUtc = CASE WHEN @state = 'Accepted' THEN SYSUTCDATETIME() ELSE NULL END,
                 NextAttemptAtUtc = DATEADD(minute, 15, SYSUTCDATETIME())
-            WHERE AppointmentId = @id AND Channel = @channel AND Kind = @kind AND State = 'Sending' AND ClaimId = @claimId;
+            WHERE AppointmentId = @id AND Channel = @channel AND Kind = @kind AND Revision = @revision
+                AND State = 'Sending' AND ClaimId = @claimId;
             """, connection);
         command.Parameters.Add("@id", SqlDbType.BigInt).Value = notification.AppointmentId;
         command.Parameters.Add("@channel", SqlDbType.VarChar, 5).Value = notification.Channel;
         command.Parameters.Add("@kind", SqlDbType.VarChar, 12).Value = notification.Kind;
+        command.Parameters.Add("@revision", SqlDbType.Int).Value = notification.Revision;
         command.Parameters.Add("@claimId", SqlDbType.UniqueIdentifier).Value = notification.ClaimId;
         command.Parameters.Add("@state", SqlDbType.VarChar, 12).Value = result.State == "Pending" && notification.Attempts >= 5
             ? "NeedsReview" : result.State;

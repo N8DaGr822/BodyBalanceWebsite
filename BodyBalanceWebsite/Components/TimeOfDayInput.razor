@@ -1,0 +1,35 @@
+@using System.Globalization
+
+<span class="time-of-day" role="group" aria-label="@Label">
+    <select aria-label="@($"{Label} hour")" value="@Hour" @onchange="ChangeHourAsync">
+        @for (var hour = 1; hour <= 12; hour++)
+        {
+            <option value="@hour">@hour</option>
+        }
+    </select>
+    <span aria-hidden="true">:</span>
+    <select aria-label="@($"{Label} minute")" value="@Time.Minutes" @onchange="ChangeMinuteAsync">
+        @for (var minute = 0; minute < 60; minute++)
+        {
+            <option value="@minute">@minute.ToString("00", CultureInfo.InvariantCulture)</option>
+        }
+    </select>
+    <select aria-label="@($"{Label} AM or PM")" value="@(Time.Hours >= 12 ? "PM" : "AM")" @onchange="ChangePeriodAsync">
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+    </select>
+</span>
+
+@code {
+    [Parameter] public string Value { get; set; } = "00:00";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public string Label { get; set; } = "Time";
+
+    // Time Display: AM/PM controls keep the existing 24-hour API value independent of browser locale.
+    private TimeSpan Time => TimeSpan.TryParseExact(Value, @"hh\:mm", CultureInfo.InvariantCulture, out var time) ? time : TimeSpan.Zero;
+    private int Hour => Time.Hours % 12 == 0 ? 12 : Time.Hours % 12;
+    private Task ChangeHourAsync(ChangeEventArgs e) => SetAsync(int.Parse(e.Value!.ToString()!, CultureInfo.InvariantCulture) % 12 + (Time.Hours >= 12 ? 12 : 0), Time.Minutes);
+    private Task ChangeMinuteAsync(ChangeEventArgs e) => SetAsync(Time.Hours, int.Parse(e.Value!.ToString()!, CultureInfo.InvariantCulture));
+    private Task ChangePeriodAsync(ChangeEventArgs e) => SetAsync(Time.Hours % 12 + (e.Value?.ToString() == "PM" ? 12 : 0), Time.Minutes);
+    private Task SetAsync(int hour, int minute) => ValueChanged.InvokeAsync(new TimeSpan(hour, minute, 0).ToString(@"hh\:mm", CultureInfo.InvariantCulture));
+}

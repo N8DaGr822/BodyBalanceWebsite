@@ -19,7 +19,7 @@ public sealed class NotificationSender(HttpClient http, IConfiguration configura
 {
     public async Task<NotificationResult> SendAsync(BookingNotification notification, CancellationToken cancellationToken)
     {
-        if (notification.Kind is "Confirmation" or "Cancellation")
+        if (notification.Kind is "Confirmation" or "Cancellation" or "Rescheduled")
             return notification.Confirmation is { } confirmation
                 ? await SendAsync(confirmation, cancellationToken)
                 : new("NeedsReview", Error: notification.Kind == "Cancellation" ? "CancellationDetailsMissing" : "ConfirmationDetailsMissing");

@@ -1,0 +1,14 @@
+.time-of-day {
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+    max-width: 100%;
+}
+
+select {
+    width: auto;
+    border: 1px solid var(--navy);
+    border-radius: .25rem;
+    padding: .4rem;
+    font: inherit;
+}

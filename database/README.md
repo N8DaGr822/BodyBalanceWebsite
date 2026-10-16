@@ -1,3 +1,13 @@
+## Appointment date/time adjustments (version 14)
+
+Apply `014_booking_rescheduling.sql` after version 13, then run `configure_api_rescheduling_access.sql` as the database administrator before deploying the API. In **Admin > View appointment > Adjust date and time**, authenticated practitioners can move their own future confirmed appointments. The service, duration, practitioner, price, location, and customer information stay unchanged. The entered time uses the appointment's displayed time zone, not the browser's zone. Ambiguous/nonexistent daylight-saving times are rejected.
+
+Adjustments must fit working hours, the practitioner's slot interval, and time off without overlapping another reservation. Admin adjustments may be made inside the public minimum-notice period. Validation and updates share the existing practitioner transaction lock. A schedule revision rejects stale edits; retrying the same saved revision/time does not queue a second email. A no-op does not email the customer.
+
+Each saved change commits an immutable updated confirmation with a separate notification revision and provider idempotency key. Pending updates superseded by a later revision or cancellation are skipped. Existing dispatch, test routing, and uncertain-delivery reconciliation rules apply; queued does not mean delivered. When inspecting or resetting notification rows, include `Revision` along with `(AppointmentId, Channel, Kind)` to identify one delivery. Existing notification rows retain revision zero.
+
+Before production deployment, validate the migration and grants against a non-production SQL database, including repeat migration, overlapping moves, concurrent approval/availability edits, stale tabs, identical retries, repeated changes, cancellation before dispatch, and email snapshot delivery. Unit tests cover time conversion, invalid dates, DST boundaries, and mocked email delivery; they do not verify SQL locking or real email delivery.
+
 ## Appointment cancellations (version 13)
 
 Apply `013_booking_cancellations.sql` after version 12 and before deploying the updated API. Signed-in practitioners can cancel their confirmed appointments from **Admin ? View appointment ? Cancel appointment and email customer**. Cancellation retains the record and releases the reserved time. Declined requests also queue a customer cancellation email. The status change and email outbox row commit together; repeated decisions do not enqueue duplicate emails. Existing review links cannot cancel confirmed appointments. Delivery uses the existing Resend configuration, test routing, dispatch retries, and NeedsReview reconciliation. Queued does not mean delivered. No new database permissions are required.
