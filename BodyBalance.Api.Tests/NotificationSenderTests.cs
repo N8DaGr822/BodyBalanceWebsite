@@ -51,6 +51,29 @@ public class NotificationSenderTests
         Assert.Equal("Accepted", (await new NotificationSender(http, configuration).SendAsync(notification, default)).State);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("tester@example.com")]
+    public async Task CancellationSendsToCustomerWithIdempotencyAndTestRouting(string? testEmail)
+    {
+        var config = Config();
+        config["NotificationTestEmail"] = testEmail;
+        config["BookingReviewSigningKey"] = null;
+        var start = new DateTime(2027, 7, 15, 18, 0, 0, DateTimeKind.Utc);
+        var details = new BookingReviewDetails(Guid.NewGuid(), "Mary", "Alex", "customer@example.com", null,
+            "Reiki", start, start.AddMinutes(30), "America/Chicago", 44m, "USD", "Studio", false, "Cancelled");
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            Assert.Equal(testEmail ?? details.CustomerEmail, json.RootElement.GetProperty("to")[0].GetString());
+            Assert.Contains("cancelled", json.RootElement.GetProperty("subject").GetString());
+            Assert.Equal($"booking-cancellation/{details.RequestId:D}", request.Headers.GetValues("Idempotency-Key").Single());
+            return new(HttpStatusCode.OK) { Content = new StringContent("{\"id\":\"cancellation-email\"}") };
+        }));
+        var notification = Notification("Email") with { Kind = "Cancellation", Confirmation = BookingReview.CancellationMessage(details) };
+        Assert.Equal("Accepted", (await new NotificationSender(http, config).SendAsync(notification, default)).State);
+    }
+
     [Fact]
     public async Task ConfirmationWithoutDetailsDoesNotSendPractitionerReviewLink()
     {

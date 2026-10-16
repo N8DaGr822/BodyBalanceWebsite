@@ -20,7 +20,8 @@ public sealed partial class ScheduleData
                 -- Dispatch Timing: Match datetime2(0) rounding so newly inserted notifications are immediately eligible.
                 WHERE n.State = 'Pending' AND n.Attempts < 5 AND n.NextAttemptAtUtc <= CAST(SYSUTCDATETIME() AS datetime2(0))
                     AND ((n.Kind = 'Request' AND a.Status = 'Requested' AND a.ReviewExpiresAtUtc > SYSUTCDATETIME())
-                        OR (n.Kind = 'Confirmation' AND a.Status = 'Confirmed' AND a.StartAtUtc > SYSUTCDATETIME()))
+                        OR (n.Kind = 'Confirmation' AND a.Status = 'Confirmed' AND a.StartAtUtc > SYSUTCDATETIME())
+                        OR (n.Kind = 'Cancellation' AND a.Status = 'Cancelled'))
                     AND (@requestId IS NULL OR a.BookingRequestId = @requestId)
                 ORDER BY n.NextAttemptAtUtc, n.AppointmentId, n.Channel
             )
@@ -54,14 +55,15 @@ public sealed partial class ScheduleData
         if (!await result.ReadAsync(cancellationToken)) return null;
         var recipientColumn = channel == "Email" ? 2 : 3;
         NotificationMessage? confirmation = null;
-        if (kind == "Confirmation")
+        if (kind is "Confirmation" or "Cancellation")
         {
             var confirmationDetails = new BookingReviewDetails(result.GetGuid(0), result.GetString(5), result.GetString(6),
                 result.GetString(7), null, result.GetString(8),
                 DateTime.SpecifyKind(result.GetDateTime(9), DateTimeKind.Utc),
                 DateTime.SpecifyKind(result.GetDateTime(10), DateTimeKind.Utc), result.GetString(11),
                 result.GetDecimal(12), result.GetString(13), result.GetString(14), false, "Confirmed");
-            confirmation = BookingReview.ConfirmationMessage(confirmationDetails);
+            confirmation = kind == "Cancellation" ? BookingReview.CancellationMessage(confirmationDetails)
+                : BookingReview.ConfirmationMessage(confirmationDetails);
         }
         return new(appointmentId, result.GetGuid(0), result.GetInt32(1), channel,
             result.IsDBNull(recipientColumn) ? null : result.GetString(recipientColumn), claimId, attempts,

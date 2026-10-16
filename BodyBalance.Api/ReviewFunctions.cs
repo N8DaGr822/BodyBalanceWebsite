@@ -101,14 +101,14 @@ public sealed partial class ScheduleFunctions
         CancellationToken cancellationToken, int? practitionerId = null)
     {
         var details = await data.DecideBookingAsync(decision, cancellationToken, practitionerId);
-        if (details?.Status == "Confirmed")
+        if (details?.Status is "Confirmed" or "Cancelled")
         {
             try { await notifications.DispatchAsync(details.RequestId, cancellationToken); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception exception)
             {
                 // Saved Approval: Delivery failures must not turn a committed approval into a client-visible failure.
-                logger.LogError(exception, "Confirmation dispatch failed for request {RequestId}; inspect the outbox.", details.RequestId);
+                logger.LogError(exception, "Customer notification dispatch failed for request {RequestId}; inspect the outbox.", details.RequestId);
             }
         }
         return await ReviewResponseAsync(request, details);

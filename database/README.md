@@ -1,3 +1,7 @@
+## Appointment cancellations (version 13)
+
+Apply `013_booking_cancellations.sql` after version 12 and before deploying the updated API. Signed-in practitioners can cancel their confirmed appointments from **Admin ? View appointment ? Cancel appointment and email customer**. Cancellation retains the record and releases the reserved time. Declined requests also queue a customer cancellation email. The status change and email outbox row commit together; repeated decisions do not enqueue duplicate emails. Existing review links cannot cancel confirmed appointments. Delivery uses the existing Resend configuration, test routing, dispatch retries, and NeedsReview reconciliation. Queued does not mean delivered. No new database permissions are required.
+
 # BodyBalance database setup
 
 Target: Azure SQL database `bodybalance` on `body-balance.database.windows.net`.

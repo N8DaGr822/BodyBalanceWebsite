@@ -7,6 +7,33 @@ namespace BodyBalance.Api.Tests;
 
 public class BookingReviewTests
 {
+    [Theory]
+    [InlineData("Confirmed", "Cancelled", true, true)]
+    [InlineData("Confirmed", "Cancelled", false, false)]
+    [InlineData("Completed", "Cancelled", true, false)]
+    [InlineData("Cancelled", "Confirmed", true, false)]
+    [InlineData("Confirmed", "Confirmed", true, false)]
+    public void ConfirmedCancellationRequiresPractitionerAuthentication(string current, string next, bool authenticated, bool expected)
+        => Assert.Equal(expected, BookingReview.CanCancelConfirmed(current, next, authenticated));
+
+    [Fact]
+    public void CancellationEmailIdentifiesTheCustomerAndAppointmentWithoutReviewCredentials()
+    {
+        var details = new BookingReviewDetails(Guid.NewGuid(), "Mary", "Client", "client@example.com", null,
+            "Dynamic Body Balancing", new DateTime(2026, 7, 20, 18, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 7, 20, 19, 0, 0, DateTimeKind.Utc), "America/Chicago", 77, "USD", "Private address", false, "Cancelled");
+        var message = BookingReview.CancellationMessage(details);
+        Assert.Equal("client@example.com", message.Recipient);
+        Assert.Contains("cancelled", message.Subject);
+        Assert.Contains("Mary", message.EmailText);
+        Assert.Contains("Dynamic Body Balancing", message.EmailText);
+        Assert.Contains("1:00 PM", message.EmailText);
+        Assert.Contains("UTC-05:00", message.EmailText);
+        Assert.DoesNotContain("Private address", message.EmailText);
+        Assert.DoesNotContain("review-request", message.EmailText);
+        Assert.Equal(message.IdempotencyKey, BookingReview.CancellationMessage(details).IdempotencyKey);
+    }
+
     private const string Key = "test-key-with-at-least-thirty-two-bytes";
 
     [Fact]

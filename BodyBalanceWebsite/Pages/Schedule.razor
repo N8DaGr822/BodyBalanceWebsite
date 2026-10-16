@@ -53,82 +53,86 @@
                 }
             }
 
-            <div class="calendar-toolbar">
-                <h2 id="calendar-month" aria-live="polite">@month.ToString("MMMM yyyy")</h2>
-                <div class="calendar-navigation" role="group" aria-label="Calendar navigation">
-                    <button type="button" class="btn btn-navy" aria-label="Previous month" disabled="@(bookingBusy || month.Year == 2000 && month.Month == 1)" @onclick="() => ChangeMonthAsync(-1)">Previous</button>
-                    <button type="button" class="btn btn-navy" disabled="@bookingBusy" @onclick="ShowCurrentMonth">Today</button>
-                    <button type="button" class="btn btn-navy" aria-label="Next month" disabled="@(bookingBusy || month.Year == 2100 && month.Month == 12)" @onclick="() => ChangeMonthAsync(1)">Next</button>
+            <div class="schedule-layout">
+                <div class="schedule-calendar-col">
+                    <div class="calendar-toolbar">
+                        <h2 id="calendar-month" aria-live="polite">@month.ToString("MMMM yyyy")</h2>
+                        <div class="calendar-navigation" role="group" aria-label="Calendar navigation">
+                            <button type="button" class="btn btn-navy" aria-label="Previous month" disabled="@(bookingBusy || month.Year == 2000 && month.Month == 1)" @onclick="() => ChangeMonthAsync(-1)">Previous</button>
+                            <button type="button" class="btn btn-navy" disabled="@bookingBusy" @onclick="ShowCurrentMonth">Today</button>
+                            <button type="button" class="btn btn-navy" aria-label="Next month" disabled="@(bookingBusy || month.Year == 2100 && month.Month == 12)" @onclick="() => ChangeMonthAsync(1)">Next</button>
+                        </div>
+                    </div>
+
+                    <p class="calendar-notice" role="status">
+                        @notice Times are shown in Central Time. Requests require practitioner approval and do not reserve a time.
+                    </p>
+                    @if (loadFailed)
+                    {
+                        <button type="button" class="btn btn-navy" @onclick="LoadPractitionersAsync">Try Again</button>
+                    }
+
+                    <div class="calendar-grid" role="region" aria-labelledby="calendar-month" tabindex="0">
+                        <CalendarContainer @key="(practitionerId, month, appointments)" FirstDate="month" DisplayedView="DisplayedView.Monthly" TasksList="appointments">
+                            <MonthlyView WeekDaysColor="var(--cream-pale)" SaturdayColor="var(--cream)" SundayColor="var(--cream)"
+                                         HeaderStyle="background:var(--navy);color:var(--text-on-navy)"
+                                         DayClick="@(e => SelectCalendarDateAsync(e.Day))" TaskClick="@(e => SelectCalendarDateAsync(e.Day))"
+                                         OutsideCurrentMonthClick="ChangeMonthAsync" />
+                        </CalendarContainer>
+                    </div>
                 </div>
-            </div>
-
-            <p class="calendar-notice" role="status">
-                @notice Times are shown in Central Time. Requests require practitioner approval and do not reserve a time.
-            </p>
-            @if (loadFailed)
-            {
-                <button type="button" class="btn btn-navy" @onclick="LoadPractitionersAsync">Try Again</button>
-            }
-
-            <div class="calendar-grid" role="region" aria-labelledby="calendar-month" tabindex="0">
-                <CalendarContainer @key="(practitionerId, month, appointments)" FirstDate="month" DisplayedView="DisplayedView.Monthly" TasksList="appointments">
-                    <MonthlyView WeekDaysColor="var(--cream-pale)" SaturdayColor="var(--cream)" SundayColor="var(--cream)"
-                                 HeaderStyle="background:var(--navy);color:var(--text-on-navy)"
-                                 DayClick="@(e => SelectCalendarDateAsync(e.Day))" TaskClick="@(e => SelectCalendarDateAsync(e.Day))"
-                                 OutsideCurrentMonthClick="ChangeMonthAsync" />
-                </CalendarContainer>
-            </div>
-            <div id="request-session" class="calendar-windows calendar-practitioner">
-                <h2 @ref="requestHeading" tabindex="-1">Request an appointment</h2>
-                @if (string.IsNullOrWhiteSpace(apiBaseUrl))
-                {
-                    <p class="calendar-notice" role="status">Online appointment requests are not available on this site yet. Dates and times will appear here when booking is connected.</p>
-                }
-                else if (loading || loadFailed)
-                {
-                    <p class="calendar-notice" role="status">@notice</p>
-                }
-                else if (!bookingEnabled)
-                {
-                    <p class="calendar-notice" role="status">This practitioner is not accepting online appointment requests yet.</p>
-                }
-                else if (slots.Length == 0)
-                {
-                    <p class="calendar-notice" role="status">No appointment times are available for this session this month. Try another month or session.</p>
-                }
-                else
-                {
-                    <p>In-person sessions: @location. Distance Reiki sessions are offered remotely. Please request at least @minimumNoticeHours hours in advance.</p>
-                    <p>Click an available day on the calendar or choose a date below, then select a time to enter your contact details.</p>
-                }
-                @if (!string.IsNullOrEmpty(calendarSelectionNotice))
-                {
-                    <p class="calendar-notice" role="status">@calendarSelectionNotice</p>
-                }
-                <label for="calendar-date">Choose a date</label>
-                <select id="calendar-date" @bind="selectedDate" @bind:after="ClearSelectedTime" disabled="@(bookingBusy || !bookingEnabled || slots.Length == 0)">
-                    <option value="">Select a date</option>
-                    @foreach (var date in slots.Select(s => LocalTime(s.StartAtUtc).Date).Distinct())
+                <div id="request-session" class="schedule-request-col calendar-practitioner">
+                    <h2 @ref="requestHeading" tabindex="-1">Request an appointment</h2>
+                    @if (string.IsNullOrWhiteSpace(apiBaseUrl))
                     {
-                        <option value="@date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)">@date.ToString("dddd, MMMM d")</option>
+                        <p class="calendar-notice" role="status">Online appointment requests are not available on this site yet. Dates and times will appear here when booking is connected.</p>
                     }
-                </select>
-                <label for="calendar-time">Choose a time</label>
-                <select id="calendar-time" @bind="selectedStart" disabled="@(bookingBusy || string.IsNullOrEmpty(selectedDate))">
-                    <option value="">Select a time</option>
-                    @foreach (var slot in slots.Where(s => LocalTime(s.StartAtUtc).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) == selectedDate))
+                    else if (loading || loadFailed)
                     {
-                        <option value="@slot.StartAtUtc.ToString("O")">@LocalTime(slot.StartAtUtc).ToString("h:mm tt") &ndash; @LocalTime(slot.EndAtUtc).ToString("h:mm tt")</option>
+                        <p class="calendar-notice" role="status">@notice</p>
                     }
-                </select>
-                @if (slots.FirstOrDefault(s => s.StartAtUtc.ToString("O") == selectedStart) is { } selectedSlot)
-                {
-                    <BodyBalanceWebsite.Components.BookingRequestForm @key="(practitionerId, serviceId, selectedStart)"
-                        ApiBaseUrl="@(apiBaseUrl!)" PractitionerId="practitionerId" ServiceId="serviceId"
-                        StartAtUtc="selectedSlot.StartAtUtc"
-                        BusyChanged="@(value => bookingBusy = value)"
-                        OffersFirstVisitPrice="@(services.First(s => s.ServiceId == serviceId).FirstTimeClientPrice is not null)" />
-                }
+                    else if (!bookingEnabled)
+                    {
+                        <p class="calendar-notice" role="status">This practitioner is not accepting online appointment requests yet.</p>
+                    }
+                    else if (slots.Length == 0)
+                    {
+                        <p class="calendar-notice" role="status">No appointment times are available for this session this month. Try another month or session.</p>
+                    }
+                    else
+                    {
+                        <p>In-person sessions: @location. Distance Reiki sessions are offered remotely. Please request at least @minimumNoticeHours hours in advance.</p>
+                        <p>Click an available day on the calendar or choose a date below, then select a time to enter your contact details.</p>
+                    }
+                    @if (!string.IsNullOrEmpty(calendarSelectionNotice))
+                    {
+                        <p class="calendar-notice" role="status">@calendarSelectionNotice</p>
+                    }
+                    <label for="calendar-date">Choose a date</label>
+                    <select id="calendar-date" @bind="selectedDate" @bind:after="ClearSelectedTime" disabled="@(bookingBusy || !bookingEnabled || slots.Length == 0)">
+                        <option value="">Select a date</option>
+                        @foreach (var date in slots.Select(s => LocalTime(s.StartAtUtc).Date).Distinct())
+                        {
+                            <option value="@date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)">@date.ToString("dddd, MMMM d")</option>
+                        }
+                    </select>
+                    <label for="calendar-time">Choose a time</label>
+                    <select id="calendar-time" @bind="selectedStart" disabled="@(bookingBusy || string.IsNullOrEmpty(selectedDate))">
+                        <option value="">Select a time</option>
+                        @foreach (var slot in slots.Where(s => LocalTime(s.StartAtUtc).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) == selectedDate))
+                        {
+                            <option value="@slot.StartAtUtc.ToString("O")">@LocalTime(slot.StartAtUtc).ToString("h:mm tt") &ndash; @LocalTime(slot.EndAtUtc).ToString("h:mm tt")</option>
+                        }
+                    </select>
+                    @if (slots.FirstOrDefault(s => s.StartAtUtc.ToString("O") == selectedStart) is { } selectedSlot)
+                    {
+                        <BodyBalanceWebsite.Components.BookingRequestForm @key="(practitionerId, serviceId, selectedStart)"
+                            ApiBaseUrl="@(apiBaseUrl!)" PractitionerId="practitionerId" ServiceId="serviceId"
+                            StartAtUtc="selectedSlot.StartAtUtc"
+                            BusyChanged="@(value => bookingBusy = value)"
+                            OffersFirstVisitPrice="@(services.First(s => s.ServiceId == serviceId).FirstTimeClientPrice is not null)" />
+                    }
+                </div>
             </div>
         </div>
     </div>

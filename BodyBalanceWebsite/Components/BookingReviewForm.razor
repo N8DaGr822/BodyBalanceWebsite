@@ -54,12 +54,30 @@
                 }
             </div>
         </EditForm>
-        <p>Approval reserves this time on the calendar. Contact the client to let them know your decision and the final details.</p>
+        <p>Approval reserves this time on the calendar. Approving or declining queues an email to the customer.</p>
     }
     else
     {
-        <p class="calendar-notice" role="status">@(details.Status == "Confirmed" ? "Appointment confirmed and saved to the calendar." : "This request has been reviewed.") Contact the client with the outcome.</p>
+        <p class="calendar-notice" role="status">@(details.Status == "Confirmed" ? "Appointment confirmed and saved to the calendar." : "This request has been reviewed.") A customer email is queued when a decision is saved.</p>
         <p>@details.Price.ToString("0.00", CultureInfo.InvariantCulture) @details.CurrencyCode &middot; @details.Location</p>
+        @if (details.Status == "Confirmed" && Token is null)
+        {
+            @if (confirmCancellation || retryStatus == "Cancelled")
+            {
+                <div class="calendar-notice" role="alert">
+                    <p>Cancel this appointment for @details.CustomerName? This releases the time and queues a cancellation email to @details.CustomerEmail.</p>
+                    <button type="button" class="btn btn-navy" disabled="@submitting" @onclick="() => DecideAsync(false)">@(submitting ? "Cancelling..." : retryStatus == "Cancelled" ? "Retry cancellation" : "Confirm cancellation and email customer")</button>
+                    @if (retryStatus is null)
+                    {
+                        <button type="button" class="btn btn-cream" disabled="@submitting" @onclick="() => confirmCancellation = false">Keep appointment</button>
+                    }
+                </div>
+            }
+            else
+            {
+                <button type="button" class="btn btn-cream" disabled="@submitting" @onclick="() => confirmCancellation = true">Cancel appointment and email customer</button>
+            }
+        }
     }
 }
 @if (!loading)
@@ -80,6 +98,7 @@
     private ReviewDetails? details;
     private bool loading = true;
     private bool submitting;
+    private bool confirmCancellation;
     private bool disposed;
     private string? error;
     private string? retryStatus;
@@ -111,6 +130,7 @@
             model.Price = details.Price;
             model.Location = details.Location;
             model.Verified = false;
+            confirmCancellation = false;
             retryStatus = null;
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
@@ -125,7 +145,8 @@
 
     private async Task DecideAsync(bool approve)
     {
-        if (submitting || details?.Status != "Requested") return;
+        if (submitting || details is null || (details.Status != "Requested"
+            && !(details.Status == "Confirmed" && Token is null && !approve && (confirmCancellation || retryStatus == "Cancelled")))) return;
         submitting = true;
         error = null;
         var status = approve ? "Confirmed" : "Cancelled";

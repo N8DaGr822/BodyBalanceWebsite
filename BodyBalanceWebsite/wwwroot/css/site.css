@@ -877,8 +877,25 @@ button {
 /* ---------- Session calendar ---------- */
 
 .session-calendar {
-    max-width: 980px;
+    max-width: 1180px;
     margin: 0 auto;
+}
+
+.schedule-layout {
+    display: grid;
+    grid-template-columns: 1.25fr 1fr;
+    gap: 2.5rem;
+    align-items: start;
+    margin-top: 1rem;
+}
+
+.schedule-request-col {
+    position: sticky;
+    top: 1.5rem;
+    background: var(--cream-pale);
+    border-radius: var(--radius-card);
+    padding: 1.75rem;
+    margin-top: 0;
 }
 
 .calendar-practitioner label {
@@ -997,7 +1014,14 @@ button {
 }
 
 .calendar-windows {
-    margin-top: 2rem;
+    margin-top: 1.25rem;
+}
+
+.calendar-windows summary {
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--navy);
+    padding: 0.5rem 0;
 }
 
 .calendar-windows li {
@@ -1027,6 +1051,15 @@ button {
 
     .benefits-grid {
         row-gap: 3.25rem;
+    }
+
+    .schedule-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .schedule-request-col {
+        position: static;
+        padding: 1.5rem;
     }
 
     .practitioners-grid {

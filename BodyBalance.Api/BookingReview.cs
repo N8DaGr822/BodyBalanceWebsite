@@ -12,6 +12,22 @@ public sealed record BookingReviewDetails(Guid RequestId, string PractitionerNam
 
 public static class BookingReview
 {
+    public static bool CanCancelConfirmed(string currentStatus, string? nextStatus, bool authenticatedPractitioner) =>
+        authenticatedPractitioner && currentStatus == "Confirmed" && nextStatus == "Cancelled";
+
+    public static NotificationMessage CancellationMessage(BookingReviewDetails details)
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(details.TimeZoneId);
+        var start = TimeZoneInfo.ConvertTime(new DateTimeOffset(details.StartAtUtc), zone);
+        var when = start.ToString("dddd, MMMM d, yyyy 'at' h:mm tt", CultureInfo.InvariantCulture);
+        var offset = start.ToString("zzz", CultureInfo.InvariantCulture);
+        return new("Email", details.CustomerEmail, "Your Entwined & Unwind appointment has been cancelled",
+            $"Hi {details.CustomerName},\n\nYour appointment with {details.PractitionerName} has been cancelled.\n\n" +
+            $"Session: {details.ServiceName}\nWhen: {when} ({details.TimeZoneId}, UTC{offset})\n\n" +
+            "Please contact your practitioner if you have questions or would like to arrange another appointment.\n\nEntwined & Unwind", "",
+            IdempotencyKey: $"booking-cancellation/{details.RequestId:D}");
+    }
+
     public static NotificationMessage ConfirmationMessage(BookingReviewDetails details)
     {
         var zone = TimeZoneInfo.FindSystemTimeZoneById(details.TimeZoneId);

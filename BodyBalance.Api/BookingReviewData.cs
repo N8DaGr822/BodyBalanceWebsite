@@ -38,7 +38,7 @@ public sealed partial class ScheduleData
         var current = await ReadReviewAsync(access, connection, transaction, authorizedPractitionerId, cancellationToken);
         if (current is null) return null;
         var details = current.Details;
-        if (details.Status != "Requested")
+        if (details.Status != "Requested" && !BookingReview.CanCancelConfirmed(details.Status, decision.Status, authorizedPractitionerId is not null))
         {
             // Lost Response: Repeating the same decision is safe, but a used link cannot change a decision.
             if (details.Status == decision.Status && (decision.Status == "Cancelled"
@@ -69,13 +69,18 @@ public sealed partial class ScheduleData
             UPDATE dbo.Appointments SET Status = @status, ReviewedAtUtc = SYSUTCDATETIME(),
                 Price = CASE WHEN @status = 'Confirmed' THEN @price ELSE Price END,
                 Location = CASE WHEN @status = 'Confirmed' THEN @location ELSE Location END
-            WHERE BookingRequestId = @requestId AND Status = 'Requested';
+            WHERE BookingRequestId = @requestId AND (Status = 'Requested'
+                OR (Status = 'Confirmed' AND @status = 'Cancelled' AND PractitionerId = @authorizedPractitionerId));
             -- Confirmation Outbox: Commit the customer email with approval, once per appointment.
             IF @status = 'Confirmed'
                 INSERT dbo.BookingNotifications(AppointmentId, Channel, Kind)
                 SELECT AppointmentId, 'Email', 'Confirmation' FROM dbo.Appointments WHERE BookingRequestId = @requestId;
+            IF @status = 'Cancelled'
+                INSERT dbo.BookingNotifications(AppointmentId, Channel, Kind)
+                SELECT AppointmentId, 'Email', 'Cancellation' FROM dbo.Appointments WHERE BookingRequestId = @requestId;
             """, connection, transaction))
         {
+            command.Parameters.Add("@authorizedPractitionerId", SqlDbType.Int).Value = (object?)authorizedPractitionerId ?? DBNull.Value;
             command.Parameters.Add("@requestId", SqlDbType.UniqueIdentifier).Value = decision.RequestId;
             command.Parameters.Add("@status", SqlDbType.VarChar, 12).Value = decision.Status!;
             var price = command.Parameters.Add("@price", SqlDbType.Decimal);
