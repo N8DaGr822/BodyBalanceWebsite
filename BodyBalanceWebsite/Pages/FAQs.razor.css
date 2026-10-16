@@ -1,0 +1,22 @@
+.faq-columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3rem;
+    align-items: start;
+}
+
+.faq-list {
+    min-width: 0;
+    max-width: none;
+    margin: 0;
+}
+
+.faq-list h2 {
+    margin-bottom: 1.5rem;
+}
+
+@media (max-width: 980px) {
+    .faq-columns {
+        grid-template-columns: 1fr;
+    }
+}
