@@ -6,7 +6,7 @@ namespace BodyBalance.Api;
 
 public sealed partial class ScheduleData
 {
-    public async Task<List<MailConversation>> GetConversationsAsync(int offset, CancellationToken cancellationToken)
+    public async Task<List<MailConversation>> GetConversationsAsync(int offset, CancellationToken cancellationToken, bool trashed = false)
     {
         await using var connection = await OpenAsync(cancellationToken);
         // Deployment Gap: Import contact messages saved by the previous API between migration and deployment.
@@ -24,10 +24,12 @@ public sealed partial class ScheduleData
             COMMIT;
             """, connection)) await import.ExecuteNonQueryAsync(cancellationToken);
         using var command = new SqlCommand("""
-            SELECT ConversationId, CustomerName, CustomerEmail, Subject, UpdatedAtUtc
-            FROM dbo.MailConversations ORDER BY UpdatedAtUtc DESC, ConversationId OFFSET @offset ROWS FETCH NEXT 50 ROWS ONLY;
+            SELECT ConversationId, CustomerName, CustomerEmail, Subject, UpdatedAtUtc, IsTrashed
+            FROM dbo.MailConversations WHERE IsTrashed = @trashed
+            ORDER BY UpdatedAtUtc DESC, ConversationId OFFSET @offset ROWS FETCH NEXT 50 ROWS ONLY;
             """, connection);
         command.Parameters.Add("@offset", SqlDbType.Int).Value = offset;
+        command.Parameters.Add("@trashed", SqlDbType.Bit).Value = trashed;
         var result = new List<MailConversation>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) result.Add(ReadConversation(reader));
@@ -37,13 +39,23 @@ public sealed partial class ScheduleData
     public async Task<MailConversation?> GetConversationAsync(Guid id, CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(cancellationToken);
-        using var command = new SqlCommand("SELECT ConversationId, CustomerName, CustomerEmail, Subject, UpdatedAtUtc FROM dbo.MailConversations WHERE ConversationId = @id;", connection);
+        using var command = new SqlCommand("SELECT ConversationId, CustomerName, CustomerEmail, Subject, UpdatedAtUtc, IsTrashed FROM dbo.MailConversations WHERE ConversationId = @id;", connection);
         command.Parameters.Add("@id", SqlDbType.UniqueIdentifier).Value = id;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken) ? ReadConversation(reader) : null;
     }
 
-    private static MailConversation ReadConversation(SqlDataReader reader) => new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc));
+    private static MailConversation ReadConversation(SqlDataReader reader) => new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc), reader.GetBoolean(5));
+
+    public async Task<bool> SetConversationTrashAsync(Guid id, bool trashed, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        // Shared Trash: Retain messages, attachments, and replay identifiers so restoration is lossless.
+        using var command = new SqlCommand("UPDATE dbo.MailConversations SET IsTrashed = @trashed WHERE ConversationId = @id;", connection);
+        command.Parameters.Add("@id", SqlDbType.UniqueIdentifier).Value = id;
+        command.Parameters.Add("@trashed", SqlDbType.Bit).Value = trashed;
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
 
     public async Task<List<MailEntry>> GetMailEntriesAsync(Guid id, int offset, CancellationToken cancellationToken)
     {
@@ -125,6 +137,9 @@ public sealed partial class ScheduleData
                 SELECT CAST(0 AS bit), 'NeedsReview', CAST(NULL AS nvarchar(998));
             ELSE
             BEGIN
+                -- Shared Trash: Serialize with trash updates before claiming a new reply.
+                IF NOT EXISTS (SELECT 1 FROM dbo.MailConversations WITH (UPDLOCK, HOLDLOCK) WHERE ConversationId=@id AND IsTrashed=0)
+                    THROW 50003, 'Restore the conversation before replying.', 1;
                 INSERT dbo.MailMessages (MessageId, ConversationId, Direction, Sender, Body, State, Actor)
                     VALUES (@messageId, @id, 'Outgoing', @sender, @body, 'Sending', @actor);
                 UPDATE dbo.MailConversations SET UpdatedAtUtc=SYSUTCDATETIME() WHERE ConversationId=@id;

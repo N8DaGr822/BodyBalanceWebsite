@@ -88,6 +88,12 @@ For Resend, add `entwinedandunwind.com` under **Domains**, configure the sending
 
 For production routing, save each practitioner's `NotificationEmail` and `NotificationPhone` in the private `Practitioners` columns, and clear **both** test override settings. For email-only testing, set only `NotificationTestEmail`; SMS stays pending. Null/unconfigured recipients leave a pending notification rather than guessing a destination. Leslie still needs her services, hours, and location configured before accepting new requests.
 
+### Shared inbox Trash
+
+Apply `database/015_shared_inbox_trash.sql` before deploying the API and website. Existing inbox SELECT/INSERT/UPDATE permissions cover the new column; no DELETE permission is needed. `/admin/messages` provides Inbox and Trash views, with whole-conversation move and restore actions shared by both practitioners. Messages, attachments, send history, and webhook replay identifiers are retained. There is no automatic purge. New incoming messages belonging to a trashed conversation remain in Trash until it is restored.
+
+`GET /api/practitioner/conversations?trashed=true` lists Trash (the default lists active conversations). `POST /api/practitioner/conversations/{id}/trash/true` moves a conversation to Trash; `/trash/false` restores it. Both mutations require shared inbox authorization and `X-Booking-Review: 1` and set an explicit, retry-safe state. New replies require an active conversation; a reply already claimed before a move may finish sending and remains in its history.
+
 ### Appointment admin and practitioner login
 
 The footer's **Admin sign-in** link opens `/admin`; existing `/practitioner` links still work. Azure Static Web Apps provides Microsoft and GitHub sign-in. Sign in once, then read the account reference displayed on that page. An administrator must verify that it belongs to the intended person and configure `PractitionerAccess__<provider>__<userId>` in backend environment settings with a comma-separated list of allowed practitioner IDs (for example `1,2` for the owner's account, after verifying the IDs in SQL). `__` maps to the .NET configuration separator; in local settings use `PractitionerAccess:<provider>:<userId>`.

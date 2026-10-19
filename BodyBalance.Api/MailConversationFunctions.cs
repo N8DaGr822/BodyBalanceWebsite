@@ -23,8 +23,21 @@ public sealed partial class ScheduleFunctions
         {
             if (!await InboxAccessAsync(request, cancellationToken)) return await JsonAsync(request, HttpStatusCode.Forbidden, new { error = "Sign in with shared inbox access." });
             var offset = int.TryParse(request.Query["offset"], out var page) && page >= 0 ? page : 0;
-            return await JsonAsync(request, HttpStatusCode.OK, await data.GetConversationsAsync(offset, cancellationToken));
+            var trashed = bool.TryParse(request.Query["trashed"], out var trash) && trash;
+            return await JsonAsync(request, HttpStatusCode.OK, await data.GetConversationsAsync(offset, cancellationToken, trashed));
         }, cancellationToken, "The inbox is temporarily unavailable.");
+
+    [Function("SetConversationTrash")]
+    public Task<HttpResponseData> SetConversationTrash(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "practitioner/conversations/{id:guid}/trash/{trashed:bool}")] HttpRequestData request,
+        Guid id, bool trashed, CancellationToken cancellationToken) => ExecuteAsync(request, async () =>
+        {
+            if (!await InboxAccessAsync(request, cancellationToken)) return await JsonAsync(request, HttpStatusCode.Forbidden, new { error = "Sign in with shared inbox access." });
+            if (Header(request, "X-Booking-Review") != "1") return await JsonAsync(request, HttpStatusCode.Forbidden, new { error = "Refresh the page before changing this conversation." });
+            return await data.SetConversationTrashAsync(id, trashed, cancellationToken)
+                ? request.CreateResponse(HttpStatusCode.NoContent)
+                : await JsonAsync(request, HttpStatusCode.NotFound, new { error = "Conversation not found." });
+        }, cancellationToken, "The conversation could not be updated. Refresh the inbox to check its status.");
 
     [Function("ConversationMessages")]
     public Task<HttpResponseData> ConversationMessages(
@@ -52,6 +65,7 @@ public sealed partial class ScheduleFunctions
             var reply = ConversationMail.Validate(JsonSerializer.Deserialize<MailReply>(buffer.AsSpan(0, count), new JsonSerializerOptions(JsonSerializerDefaults.Web))
                 ?? throw new BookingException("Enter a reply."));
             var conversation = await data.GetConversationAsync(id, cancellationToken) ?? throw new BookingException("Conversation not found.");
+            if (conversation.IsTrashed) throw new BookingException("Restore the conversation before replying.");
             var sender = configuration["NotificationFromEmail"];
             if (!MailboxAddress.TryParse(sender, out var from) || from.Address != sender || string.IsNullOrWhiteSpace(configuration["ResendApiKey"]))
                 throw new BookingException("Inbox sending is not configured yet.");

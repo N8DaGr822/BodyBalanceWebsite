@@ -6,7 +6,7 @@ using MimeKit.Text;
 
 namespace BodyBalance.Api;
 
-public sealed record MailConversation(Guid ConversationId, string CustomerName, string CustomerEmail, string Subject, DateTime UpdatedAtUtc);
+public sealed record MailConversation(Guid ConversationId, string CustomerName, string CustomerEmail, string Subject, DateTime UpdatedAtUtc, bool IsTrashed = false);
 public sealed record MailEntry(Guid MessageId, string Direction, string Sender, string Body, DateTime CreatedAtUtc,
     string State, string? ProviderId, bool HasOriginal, string? Actor);
 public sealed record MailReply(Guid MessageId, string? Body);

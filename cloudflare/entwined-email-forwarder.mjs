@@ -20,7 +20,8 @@ export async function deliver(env, key) {
   const recipient = object.customMetadata.recipient;
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const response = await fetch(url, {
-    method: "POST", redirect: "error", signal: AbortSignal.timeout(20000), body: raw,
+    // Delivery Redirects: Inspect redirects as failed responses; never forward signed mail to another URL.
+    method: "POST", redirect: "manual", signal: AbortSignal.timeout(20000), body: raw,
     headers: {
       "Content-Type": "message/rfc822", "X-Inbox-Timestamp": timestamp,
       "X-Inbox-Recipient": recipient,
@@ -40,7 +41,8 @@ export default {
       const digest = hex(await crypto.subtle.digest("SHA-256", raw));
       const key = `pending/${digest}`;
       await env.INBOX_PENDING.put(key, raw, { customMetadata: { recipient: message.to.toLowerCase() } });
-      ctx.waitUntil(deliver(env, key).catch(() => console.error("Inbox delivery deferred; retained in R2 for scheduled retry.")));
+      ctx.waitUntil(deliver(env, key).catch(error => console.error("Inbox delivery deferred; retained in R2 for scheduled retry.",
+        /^Inbox returned HTTP \d{3}$/.test(error?.message) ? error.message : error?.name ?? "Unknown error")));
     };
     // Independent Copies: A failed inbox delivery must not prevent either Gmail forward.
     const results = await Promise.allSettled([store(), ...destinations.map(address => message.forward(address))]);
@@ -56,8 +58,10 @@ export default {
     try { page = await env.INBOX_PENDING.list({ prefix: "pending/", limit: 10, cursor }); }
     catch { page = await env.INBOX_PENDING.list({ prefix: "pending/", limit: 10 }); }
     // Fair Retries: Advance even when a message fails so one malformed email cannot block newer mail.
-    await Promise.allSettled(page.objects.map(object => deliver(env, object.key).catch(() => {
-      console.error("Inbox retry failed; message remains in private R2 storage.");
+    await Promise.allSettled(page.objects.map(object => deliver(env, object.key).catch(error => {
+      // Delivery Diagnostics: Log status or error type without email contents, addresses, or secrets.
+      console.error("Inbox retry failed; message remains in private R2 storage.",
+        /^Inbox returned HTTP \d{3}$/.test(error?.message) ? error.message : error?.name ?? "Unknown error");
     })));
     if (page.truncated) await env.INBOX_PENDING.put("retry-cursor", page.cursor);
     else await env.INBOX_PENDING.delete("retry-cursor");

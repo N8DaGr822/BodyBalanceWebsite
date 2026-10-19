@@ -36,3 +36,20 @@ test("storage failure still attempts both Gmail destinations", async () => {
   await assert.rejects(worker.email(message, { INBOX_PENDING: { put: async () => { throw new Error("unavailable"); } } }, { waitUntil() {} }));
   assert.deepEqual(forwarded, ["nathen.leslielentz@gmail.com", "sherk.mary@gmail.com"]);
 });
+
+test("redirects do not forward signed mail or remove its queued copy", async () => {
+  const previous = globalThis.fetch;
+  const deleted = [];
+  const env = {
+    INBOX_URL: "https://example.com/api/mail/incoming", INBOX_WEBHOOK_SECRET: "test-secret-with-at-least-32-characters",
+    INBOX_PENDING: { get: async () => ({ arrayBuffer: async () => new ArrayBuffer(0), customMetadata: { recipient: "hello@example.com" } }), delete: async key => deleted.push(key) }
+  };
+  try {
+    globalThis.fetch = async (url, options) => {
+      assert.equal(options.redirect, "manual");
+      return { ok: false, status: 302 };
+    };
+    await assert.rejects(deliver(env, "pending/test"), /Inbox returned HTTP 302/);
+    assert.deepEqual(deleted, []);
+  } finally { globalThis.fetch = previous; }
+});

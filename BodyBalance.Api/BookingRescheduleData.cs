@@ -48,8 +48,8 @@ public sealed partial class ScheduleData
         // Admin Adjustment: Preserve booked duration and allow short-notice changes, within available working hours.
         var windows = await GetAvailabilityAsync(practitioner with { MinimumNoticeHours = 0 },
             new DateTime(local.Year, local.Month, 1), connection, transaction, now, cancellationToken, requestId);
-        if (!Availability.Slots(windows, zone, (int)duration.TotalMinutes, practitioner.SlotIntervalMinutes)
-            .Any(s => s.StartAtUtc == start && s.EndAtUtc == end))
+        // Admin Adjustment: Allow any minute when the entire session fits in an available window.
+        if (!windows.Any(w => start >= w.StartAtUtc && end <= w.EndAtUtc))
             throw new BookingException("This time is unavailable. Choose a time within working hours that does not overlap another appointment or time off.", true);
         var updated = details with { StartAtUtc = start, EndAtUtc = end, ScheduleRevision = checked(details.ScheduleRevision + 1) };
         using (var command = new SqlCommand("""

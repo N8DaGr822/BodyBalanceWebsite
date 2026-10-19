@@ -22,8 +22,13 @@
     {
         <div class="inbox-layout">
             <div>
-                <h2>Conversations</h2>
+                <h2>@(showTrash ? "Trash" : "Conversations")</h2>
+                <div class="calendar-navigation">
+                    <button class="btn btn-cream" disabled="@(loading || sending)" aria-pressed="@(!showTrash)" @onclick="() => ChangeFolderAsync(false)">Inbox</button>
+                    <button class="btn btn-cream" disabled="@(loading || sending)" aria-pressed="@showTrash" @onclick="() => ChangeFolderAsync(true)">Trash</button>
+                </div>
                 <p>Shared by Leslie and Mary. Newest activity first.</p>
+                @if (showTrash) { <p>Conversations and attachments stay here until restored. Nothing is permanently deleted.</p> }
                 @if (conversations.Length == 0) { <p>No conversations on this page.</p> }
                 @foreach (var item in conversations)
                 {
@@ -40,6 +45,8 @@
                 @if (selected is not null)
                 {
                     <h2>@selected.Conversation.Subject</h2>
+                    <button class="btn btn-cream" disabled="@(loading || sending || uncertain || !string.IsNullOrWhiteSpace(draft))" @onclick="SetTrashAsync">@(selected.Conversation.IsTrashed ? "Restore to inbox" : "Move conversation to Trash")</button>
+                    <p>This changes the shared inbox for both practitioners. Send or clear any draft first.</p>
                     <p>Reply to: <strong>@selected.Conversation.CustomerEmail</strong></p>
                     <p>Send from: <strong>hello@entwinedandunwind.com</strong></p>
                     @foreach (var item in selected.Messages.Reverse())
@@ -60,11 +67,15 @@
                         <button class="btn btn-cream" disabled="@(loading || sending || messageOffset == 0)" @onclick="() => MessagesPageAsync(-25)">Newer messages</button>
                         <button class="btn btn-cream" disabled="@(loading || sending || selected.Messages.Length < 25)" @onclick="() => MessagesPageAsync(25)">Older messages</button>
                     </div>
+                    @if (!selected.Conversation.IsTrashed)
+                    {
                     <label for="inbox-reply">Your reply</label>
                     <textarea id="inbox-reply" rows="8" maxlength="10000" @bind="draft" disabled="@(loading || sending || uncertain)"></textarea>
                     <p>Review the address and message before sending. Replies go to this client; both practitioners can read them here.</p>
                     <button class="btn btn-navy" disabled="@(loading || sending || uncertain || string.IsNullOrWhiteSpace(draft) || string.IsNullOrWhiteSpace(selected.Conversation.CustomerEmail))" @onclick="SendAsync">@(sending ? "Sending..." : "Send reply")</button>
                     <button class="btn btn-cream" disabled="@(loading || sending)" @onclick='() => draft = ""'>Clear draft</button>
+                    }
+                    else { <p>Restore this conversation to reply.</p> }
                 }
                 else { <p>Select a conversation to read and reply.</p> }
             </div>
@@ -81,6 +92,7 @@
     private Guid replyId = Guid.NewGuid();
     private int offset, messageOffset;
     private bool loading, sending, signInRequired, disposed, uncertain;
+    private bool showTrash;
     private string? error, notice;
     private string ApiRoot => (Configuration["ScheduleApiBaseUrl"] ?? "").TrimEnd('/');
     protected override Task OnInitializedAsync() => LoadAsync();
@@ -93,7 +105,7 @@
         try
         {
             if (string.IsNullOrWhiteSpace(ApiRoot)) throw new InvalidOperationException();
-            using var response = await Http.GetAsync($"{ApiRoot}/practitioner/conversations?offset={offset}", cancellation.Token);
+            using var response = await Http.GetAsync($"{ApiRoot}/practitioner/conversations?offset={offset}&trashed={showTrash}", cancellation.Token);
             signInRequired = response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
             if (signInRequired) { conversations = null; selected = null; draft = ""; return; }
             response.EnsureSuccessStatusCode();
@@ -145,9 +157,50 @@
     private async Task PageAsync(int change) { offset += change; await LoadAsync(); }
     private async Task MessagesPageAsync(int change) { messageOffset += change; await LoadAsync(); }
 
+    private async Task ChangeFolderAsync(bool trash)
+    {
+        if (loading || sending || showTrash == trash) return;
+        if (!string.IsNullOrWhiteSpace(draft) || uncertain)
+        { error = "Send or clear your draft and resolve any unconfirmed send before switching folders."; return; }
+        showTrash = trash;
+        offset = messageOffset = 0;
+        selected = null;
+        notice = null;
+        replyId = Guid.NewGuid();
+        await LoadAsync();
+    }
+
+    private async Task SetTrashAsync()
+    {
+        if (selected is null || loading || sending || uncertain || !string.IsNullOrWhiteSpace(draft)) return;
+        sending = true;
+        error = notice = null;
+        var trash = !selected.Conversation.IsTrashed;
+        var saved = false;
+        try
+        {
+            // Shared Trash: Set an explicit state so retrying an uncertain request cannot toggle it back.
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiRoot}/practitioner/conversations/{selected.Conversation.ConversationId}/trash/{trash}");
+            request.Headers.Add("X-Booking-Review", "1");
+            using var response = await Http.SendAsync(request, cancellation.Token);
+            response.EnsureSuccessStatusCode();
+            if (disposed) return;
+            selected = null;
+            offset = messageOffset = 0;
+            replyId = Guid.NewGuid();
+            notice = trash ? "Conversation moved to Trash. You can restore it from the Trash view." : "Conversation restored to the inbox.";
+            saved = true;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+        { if (!disposed) error = "We couldn't confirm the change. Refresh the inbox to check whether the conversation moved."; }
+        finally { sending = false; }
+        if (saved && !disposed) await LoadAsync();
+    }
+
     private async Task SendAsync()
     {
-        if (selected is null || sending || loading || uncertain || string.IsNullOrWhiteSpace(draft)) return;
+        if (selected is null || selected.Conversation.IsTrashed || sending || loading || uncertain || string.IsNullOrWhiteSpace(draft)) return;
         sending = true;
         error = null;
         notice = null;
@@ -184,7 +237,7 @@
 
     private static string StateLabel(string state) => state switch { "Accepted" => "Accepted by Resend", "Sending" => "Send pending confirmation", "NotSent" => "Confirmed not sent", _ => "Send needs review" };
     public void Dispose() { disposed = true; cancellation.Cancel(); cancellation.Dispose(); }
-    private sealed record Conversation(Guid ConversationId, string CustomerName, string CustomerEmail, string Subject, DateTime UpdatedAtUtc);
+    private sealed record Conversation(Guid ConversationId, string CustomerName, string CustomerEmail, string Subject, DateTime UpdatedAtUtc, bool IsTrashed);
     private sealed record Entry(Guid MessageId, string Direction, string Sender, string Body, DateTime CreatedAtUtc, string State, string? ProviderId, bool HasOriginal, string? Actor);
     private sealed record ConversationDetail(Conversation Conversation, Entry[] Messages);
     private sealed record SendResult(string State);
