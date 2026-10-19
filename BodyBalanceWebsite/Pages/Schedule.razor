@@ -192,7 +192,7 @@
         var (version, token) = BeginRequest();
         try
         {
-            var result = await Http.GetFromJsonAsync<Practitioner[]>($"{apiBaseUrl!.TrimEnd('/')}/practitioners", token) ?? [];
+            var result = await LoadScheduleDataAsync<Practitioner[]>($"{apiBaseUrl!.TrimEnd('/')}/practitioners", token) ?? [];
             if (disposed || version != requestVersion) return;
             practitioners = result;
             if (practitioners.Length == 0)
@@ -219,6 +219,7 @@
         loading = true;
         calendarSelectionNotice = null;
         services = [];
+        loadFailed = false;
         serviceId = 0;
         appointments = [];
         slots = [];
@@ -227,7 +228,7 @@
         notice = "Loading sessions.";
         try
         {
-            var result = await Http.GetFromJsonAsync<Service[]>($"{apiBaseUrl.TrimEnd('/')}/practitioners/{practitionerId}/services", token) ?? [];
+            var result = await LoadScheduleDataAsync<Service[]>($"{apiBaseUrl.TrimEnd('/')}/practitioners/{practitionerId}/services", token) ?? [];
             if (disposed || version != requestVersion) return;
             services = result;
             serviceId = services.FirstOrDefault()?.ServiceId ?? 0;
@@ -254,7 +255,7 @@
         notice = "Loading available hours.";
         try
         {
-            var result = await Http.GetFromJsonAsync<AvailabilityResponse>(
+            var result = await LoadScheduleDataAsync<AvailabilityResponse>(
                 $"{apiBaseUrl.TrimEnd('/')}/practitioners/{practitionerId}/availability?month={month.ToString("yyyy-MM", CultureInfo.InvariantCulture)}{(serviceId > 0 ? $"&serviceId={serviceId}" : "")}", token)
                 ?? throw new JsonException("Missing availability response.");
             if (disposed || version != requestVersion) return;
@@ -285,6 +286,41 @@
         }
     }
 
+    private async Task<T?> LoadScheduleDataAsync<T>(string url, CancellationToken token)
+    {
+        // Schedule Startup: Retry read-only requests while the database resumes, with a bounded wait.
+        using var retryCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+        retryCancellation.CancelAfter(TimeSpan.FromMinutes(2));
+        var retryToken = retryCancellation.Token;
+        notice = "Getting the schedule ready. This may take a minute or two. Please stay on this page; we'll keep trying automatically.";
+        StateHasChanged();
+
+        while (true)
+        {
+            retryToken.ThrowIfCancellationRequested();
+            using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(retryToken);
+            attemptCancellation.CancelAfter(TimeSpan.FromSeconds(30));
+            try
+            {
+                return await Http.GetFromJsonAsync<T>(url, attemptCancellation.Token);
+            }
+            catch (HttpRequestException exception) when (exception.StatusCode is null
+                or System.Net.HttpStatusCode.RequestTimeout
+                or System.Net.HttpStatusCode.BadGateway
+                or System.Net.HttpStatusCode.ServiceUnavailable
+                or System.Net.HttpStatusCode.GatewayTimeout)
+            {
+                // Temporary Connectivity: Allow the service time to recover before another read.
+            }
+            catch (OperationCanceledException) when (!retryToken.IsCancellationRequested)
+            {
+                // Request Timeout: Retry only while this selection's overall wait is still active.
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(5), retryToken);
+        }
+    }
+
     // State Sync: Cancel obsolete requests and prevent slower responses overwriting a newer selection.
     private (int Version, CancellationToken Token) BeginRequest()
     {
@@ -301,7 +337,7 @@
         slots = [];
         bookingEnabled = false;
         loadFailed = true;
-        notice = "We couldn't load the schedule. Please try again shortly.";
+        notice = "The schedule is taking longer than expected to load. Please try again shortly, or contact us for help requesting an appointment.";
     }
 
     private async Task ChangeMonthAsync(int offset)
