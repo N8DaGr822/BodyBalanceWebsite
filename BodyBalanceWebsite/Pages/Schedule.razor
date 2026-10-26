@@ -129,8 +129,7 @@
                         <BodyBalanceWebsite.Components.BookingRequestForm @key="(practitionerId, serviceId, selectedStart)"
                             ApiBaseUrl="@(apiBaseUrl!)" PractitionerId="practitionerId" ServiceId="serviceId"
                             StartAtUtc="selectedSlot.StartAtUtc"
-                            BusyChanged="@(value => bookingBusy = value)"
-                            OffersFirstVisitPrice="@(services.First(s => s.ServiceId == serviceId).FirstTimeClientPrice is not null)" />
+                            BusyChanged="@(value => bookingBusy = value)" />
                     }
                 </div>
             </div>

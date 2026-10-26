@@ -42,13 +42,6 @@ else
                     <InputText id="booking-phone" type="tel" @bind-Value="model.CustomerPhone" maxlength="30" autocomplete="tel" />
                 </div>
             </div>
-            @if (OffersFirstVisitPrice)
-            {
-                <label class="booking-first-visit">
-                    <InputCheckbox @bind-Value="model.IsFirstVisit" />
-                    I am a first-time client with this practitioner. I understand eligibility and the final price will be confirmed before my appointment.
-                </label>
-            }
         </fieldset>
         @if (!string.IsNullOrEmpty(error))
         {
@@ -63,7 +56,6 @@ else
     [Parameter] public int PractitionerId { get; set; }
     [Parameter] public int ServiceId { get; set; }
     [Parameter] public DateTimeOffset StartAtUtc { get; set; }
-    [Parameter] public bool OffersFirstVisitPrice { get; set; }
     [Parameter] public EventCallback<bool> BusyChanged { get; set; }
 
     private readonly ContactDetails model = new();
@@ -86,7 +78,7 @@ else
             using var response = await Http.PostAsJsonAsync($"{ApiBaseUrl.TrimEnd('/')}/booking-requests", new
             {
                 requestId, PractitionerId, ServiceId, StartAtUtc,
-                model.CustomerName, model.CustomerEmail, model.CustomerPhone, model.IsFirstVisit
+                model.CustomerName, model.CustomerEmail, model.CustomerPhone
             }, cancellation.Token);
             if (disposed) return;
             if (response.IsSuccessStatusCode)
@@ -137,7 +129,6 @@ else
         [Required, StringLength(150), Display(Name = "Name")] public string CustomerName { get; set; } = "";
         [Required, EmailAddress, StringLength(254), Display(Name = "Email")] public string CustomerEmail { get; set; } = "";
         [StringLength(30), Display(Name = "Phone")] public string? CustomerPhone { get; set; }
-        public bool IsFirstVisit { get; set; }
     }
     private sealed record BookingReceipt(Guid RequestId, string Status, DateTimeOffset StartAtUtc,
         DateTimeOffset EndAtUtc, string ServiceName, string TimeZoneId, string Location);

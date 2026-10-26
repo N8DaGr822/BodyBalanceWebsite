@@ -103,6 +103,7 @@
                             <h4>@booking.CustomerName &middot; @booking.ServiceName</h4>
                             <p>@TimeZoneInfo.ConvertTime(booking.StartAtUtc, TimeZoneInfo.FindSystemTimeZoneById(booking.TimeZoneId == "Central Standard Time" ? "America/Chicago" : booking.TimeZoneId)).ToString("ddd, MMM d, yyyy 'at' h:mm tt") (@booking.TimeZoneId)</p>
                             <a class="btn btn-navy" href="admin/requests/@booking.RequestId">Review request</a>
+                            <a class="btn btn-cream" href="admin/requests/@booking.RequestId?adjust=true">Adjust</a>
                         </article>
                     }
                 }

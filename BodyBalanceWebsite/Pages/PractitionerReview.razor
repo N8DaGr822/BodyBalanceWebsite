@@ -9,7 +9,7 @@
 <section class="content-section"><div class="container session-calendar">
     @if (!string.IsNullOrWhiteSpace(Configuration["ScheduleApiBaseUrl"]))
     {
-        <BodyBalanceWebsite.Components.BookingReviewForm @key="RequestId" ApiBaseUrl="@(Configuration["ScheduleApiBaseUrl"]!)" RequestId="RequestId" />
+        <BodyBalanceWebsite.Components.BookingReviewForm @key="RequestId" ApiBaseUrl="@(Configuration["ScheduleApiBaseUrl"]!)" RequestId="RequestId" Adjust="Adjust" />
     }
     else
     {
@@ -19,4 +19,5 @@
 
 @code {
     [Parameter] public Guid RequestId { get; set; }
+    [SupplyParameterFromQuery] public bool Adjust { get; set; }
 }

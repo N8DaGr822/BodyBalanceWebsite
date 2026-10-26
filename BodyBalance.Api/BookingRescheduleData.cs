@@ -26,8 +26,8 @@ public sealed partial class ScheduleData
         var current = await ReadReviewAsync(new(requestId, null), connection, transaction, authorizedPractitionerId, cancellationToken);
         if (current is null) return null;
         var details = current.Details;
-        if (details.Status != "Confirmed")
-            throw new BookingException("Only confirmed appointments can be adjusted. Refresh to see the current status.", true);
+        if (details.Status is not ("Requested" or "Confirmed"))
+            throw new BookingException("Only pending requests and confirmed appointments can be adjusted. Refresh to see the current status.", true);
         var start = BookingReview.ChangedStartUtc(change, details.TimeZoneId);
         // Lost Response: A replay of the immediately preceding change returns without another update or email.
         if (details.ScheduleRevision == (long)change.ExpectedRevision + 1 && details.StartAtUtc == start)
@@ -55,11 +55,11 @@ public sealed partial class ScheduleData
         using (var command = new SqlCommand("""
             UPDATE dbo.Appointments SET StartAtUtc = @start, EndAtUtc = @end, ScheduleRevision = @revision,
                 ReviewedAtUtc = SYSUTCDATETIME()
-            WHERE BookingRequestId = @requestId AND PractitionerId = @practitionerId AND Status = 'Confirmed';
+            WHERE BookingRequestId = @requestId AND PractitionerId = @practitionerId AND Status IN ('Requested', 'Confirmed');
             -- Update Outbox: Snapshot the email with the saved change; subsequent edits cannot alter its payload.
             INSERT dbo.BookingNotifications(AppointmentId, Channel, Kind, Revision, MessageJson)
             SELECT AppointmentId, 'Email', 'Rescheduled', @revision, @message
-            FROM dbo.Appointments WHERE BookingRequestId = @requestId;
+            FROM dbo.Appointments WHERE BookingRequestId = @requestId AND Status = 'Confirmed';
             """, connection, transaction))
         {
             command.Parameters.Add("@requestId", SqlDbType.UniqueIdentifier).Value = requestId;

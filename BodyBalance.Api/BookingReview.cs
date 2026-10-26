@@ -5,7 +5,7 @@ using System.Text;
 namespace BodyBalance.Api;
 
 public sealed record ReviewAccess(Guid RequestId, string? Token);
-public sealed record BookingDecision(Guid RequestId, string? Token, string? Status, decimal? Price, string? Location);
+public sealed record BookingDecision(Guid RequestId, string? Token, string? Status, decimal? Price, string? Location, int ExpectedRevision = 0);
 public sealed record BookingTimeChange(DateTime StartLocal, int ExpectedRevision);
 public sealed record BookingReviewDetails(Guid RequestId, string PractitionerName, string CustomerName,
     string CustomerEmail, string? CustomerPhone, string ServiceName, DateTime StartAtUtc, DateTime EndAtUtc,

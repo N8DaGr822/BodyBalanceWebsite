@@ -45,6 +45,8 @@ public sealed partial class ScheduleData
                 || details.Price == decision.Price && details.Location == decision.Location)) return details;
             throw new BookingException("This request has already been reviewed. Refresh to see its status.", true);
         }
+        if (details.ScheduleRevision != decision.ExpectedRevision)
+            throw new BookingException("This appointment time changed. Refresh before reviewing it again.", true);
         if (decision.Status == "Confirmed")
         {
             var practitioner = (await GetPractitionersAsync(connection, transaction, cancellationToken))
@@ -54,15 +56,18 @@ public sealed partial class ScheduleData
                 .Find(s => s.ServiceId == current.ServiceId)
                 ?? throw new BookingException("This session is no longer offered.", true);
             if (details.EndAtUtc - details.StartAtUtc != TimeSpan.FromMinutes(service.DurationMinutes)
-                || details.StartAtUtc < current.CreatedAtUtc.AddHours(practitioner.MinimumNoticeHours))
+                || (details.ScheduleRevision == 0 && details.StartAtUtc < current.CreatedAtUtc.AddHours(practitioner.MinimumNoticeHours)))
                 throw new BookingException("The session duration or notice requirement has changed. Arrange a new request with the client.", true);
             var zone = TimeZoneInfo.FindSystemTimeZoneById(practitioner.TimeZoneId);
             var local = TimeZoneInfo.ConvertTimeFromUtc(details.StartAtUtc, zone);
             // Notice Policy: Submission met the lead time; approval may happen within that notice period.
             var windows = await GetAvailabilityAsync(practitioner with { MinimumNoticeHours = 0 },
                 new DateTime(local.Year, local.Month, 1), connection, transaction, DateTime.UtcNow, cancellationToken);
-            if (!Availability.Slots(windows, zone, service.DurationMinutes, practitioner.SlotIntervalMinutes)
-                .Any(s => s.StartAtUtc == details.StartAtUtc && s.EndAtUtc == details.EndAtUtc))
+            // Adjusted Requests: Match the admin editor's minute-level working-hours validation.
+            if (details.ScheduleRevision > 0
+                ? !windows.Any(w => details.StartAtUtc >= w.StartAtUtc && details.EndAtUtc <= w.EndAtUtc)
+                : !Availability.Slots(windows, zone, service.DurationMinutes, practitioner.SlotIntervalMinutes)
+                    .Any(s => s.StartAtUtc == details.StartAtUtc && s.EndAtUtc == details.EndAtUtc))
                 throw new BookingException("This time is no longer available. Contact the client to arrange another time.", true);
         }
         using (var command = new SqlCommand("""

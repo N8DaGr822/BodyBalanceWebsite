@@ -20,10 +20,10 @@
         <dt>Email</dt><dd>@details.CustomerEmail</dd>
         <dt>Phone</dt><dd>@(details.CustomerPhone ?? "Not provided")</dd>
         <dt>Appointment time</dt><dd>@LocalTime(details.StartAtUtc).ToString("dddd, MMMM d, yyyy 'at' h:mm tt") &ndash; @LocalTime(details.EndAtUtc).ToString("h:mm tt") (@details.TimeZoneId)</dd>
-        <dt>First visit with you</dt><dd>@(details.IsFirstVisitRequested ? "Client requested first-visit pricing; please verify eligibility." : "Not requested")</dd>
+        <dt>First visit with you</dt><dd>@(details.IsFirstVisitRequested ? "Client requested first-visit pricing; please verify eligibility." : "Practitioner determines eligibility and final price at approval.")</dd>
         <dt>Status</dt><dd>@(details.Status == "Cancelled" ? "Declined / cancelled" : details.Status)</dd>
     </dl>
-    @if (details.Status == "Requested")
+    @if (details.Status == "Requested" && !editingTime)
     {
         <EditForm Model="model" OnValidSubmit="ApproveAsync" class="booking-form">
             <DataAnnotationsValidator />
@@ -33,6 +33,7 @@
                 <div class="contact-form">
                     <div>
                         <label for="review-price">Agreed price (@details.CurrencyCode)</label>
+                        <p>Set the first-time customer price here after verifying eligibility.</p>
                         <InputNumber id="review-price" @bind-Value="model.Price" min="0" max="99999999.99" step="0.01" />
                     </div>
                     <div>
@@ -56,11 +57,12 @@
         </EditForm>
         <p>Approval reserves this time on the calendar. Approving or declining queues an email to the customer.</p>
     }
-    else
+    else if (details.Status != "Requested")
     {
         <p class="calendar-notice" role="status">@(details.Status == "Confirmed" ? "Appointment confirmed and saved to the calendar." : "This request has been reviewed.") A customer email is queued when a decision is saved.</p>
         <p>@details.Price.ToString("0.00", CultureInfo.InvariantCulture) @details.CurrencyCode &middot; @details.Location</p>
-        @if (details.Status == "Confirmed" && Token is null)
+    }
+    @if (details.Status is "Requested" or "Confirmed" && Token is null)
         {
             @if (editingTime)
             {
@@ -72,10 +74,10 @@
                         <label for="appointment-start">New date (@details.TimeZoneId)</label>
                         <InputDate id="appointment-start" @bind-Value="timeModel.StartLocal" />
                         <div>New start time <TimeOfDayInput Label="New appointment start time" @bind-Value="timeModel.StartTime" /></div>
-                        <p>The session length stays the same. Choose a time within working hours. An updated confirmation will be emailed to @details.CustomerEmail.</p>
+                        <p>The session length stays the same. Choose a time within working hours. @(details.Status == "Requested" ? "The request stays pending until approved; no customer email is sent yet." : $"An updated confirmation will be emailed to {details.CustomerEmail}.")</p>
                     </fieldset>
                     <div class="calendar-navigation">
-                        <button type="submit" class="btn btn-navy" disabled="@submitting">@(submitting ? "Saving..." : retryTimeChange ? "Retry the same change" : "Save time and email customer")</button>
+                        <button type="submit" class="btn btn-navy" disabled="@submitting">@(submitting ? "Saving..." : retryTimeChange ? "Retry the same change" : details.Status == "Requested" ? "Save request time" : "Save time and email customer")</button>
                         @if (!retryTimeChange)
                         {
                             <button type="button" class="btn btn-cream" disabled="@submitting" @onclick="() => editingTime = false">Keep current time</button>
@@ -83,7 +85,7 @@
                     </div>
                 </EditForm>
             }
-            else if (confirmCancellation || retryStatus == "Cancelled")
+            else if (details.Status == "Confirmed" && (confirmCancellation || retryStatus == "Cancelled"))
             {
                 <div class="calendar-notice" role="alert">
                     <p>Cancel this appointment for @details.CustomerName? This releases the time and queues a cancellation email to @details.CustomerEmail.</p>
@@ -96,11 +98,13 @@
             }
             else
             {
-                <button type="button" class="btn btn-navy" disabled="@submitting" @onclick="BeginTimeEdit">Adjust date and time</button>
-                <button type="button" class="btn btn-cream" disabled="@submitting" @onclick="() => confirmCancellation = true">Cancel appointment and email customer</button>
+                <button type="button" class="btn btn-navy" disabled="@(submitting || retryStatus is not null)" @onclick="BeginTimeEdit">Adjust date and time</button>
+                @if (details.Status == "Confirmed")
+                {
+                    <button type="button" class="btn btn-cream" disabled="@submitting" @onclick="() => confirmCancellation = true">Cancel appointment and email customer</button>
+                }
             }
         }
-    }
 }
 @if (!loading)
 {
@@ -114,6 +118,7 @@
     [Parameter, EditorRequired] public string ApiBaseUrl { get; set; } = "";
     [Parameter] public Guid RequestId { get; set; }
     [Parameter] public string? Token { get; set; }
+    [Parameter] public bool Adjust { get; set; }
 
     private readonly CancellationTokenSource cancellation = new();
     private readonly ReviewFields model = new();
@@ -159,6 +164,7 @@
             editingTime = false;
             retryTimeChange = false;
             retryStatus = null;
+            if (Adjust && Token is null && details.Status == "Requested") BeginTimeEdit();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception exception) when (exception is HttpRequestException or JsonException or OperationCanceledException)
@@ -180,7 +186,7 @@
 
     private async Task RescheduleAsync()
     {
-        if (submitting || details?.Status != "Confirmed" || Token is not null || timeModel.StartLocal is null) return;
+        if (submitting || details?.Status is not ("Requested" or "Confirmed") || Token is not null || timeModel.StartLocal is null) return;
         submitting = true;
         error = null;
         try
@@ -194,6 +200,7 @@
                 details = await response.Content.ReadFromJsonAsync<ReviewDetails>(cancellation.Token)
                     ?? throw new JsonException("Missing updated appointment.");
                 editingTime = false;
+                model.Verified = false;
                 retryTimeChange = false;
             }
             else if (response.StatusCode is System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.Conflict or System.Net.HttpStatusCode.NotFound)
@@ -232,7 +239,7 @@
         try
         {
             using var response = await PostAsync("decision", new { RequestId, Token, Status = status,
-                Price = approve ? model.Price : null, Location = approve ? model.Location : null });
+                Price = approve ? model.Price : null, Location = approve ? model.Location : null, ExpectedRevision = details.ScheduleRevision });
             if (disposed) return;
             if (response.IsSuccessStatusCode)
             {

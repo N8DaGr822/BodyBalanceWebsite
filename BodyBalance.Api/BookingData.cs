@@ -63,19 +63,6 @@ public sealed partial class ScheduleData
             .Find(s => s.StartAtUtc == request.StartAtUtc.UtcDateTime)
             ?? throw new BookingException("This time is no longer available or does not meet the advance-notice requirement. Choose another time.", true);
 
-        bool hasHistory;
-        using (var command = new SqlCommand("""
-            SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.Appointments
-                WHERE PractitionerId = @id AND LOWER(LTRIM(RTRIM(CustomerEmail))) = @email
-                    AND Status IN ('Requested', 'Confirmed', 'Completed', 'NoShow'))
-                THEN 1 ELSE 0 END;
-            """, connection, transaction))
-        {
-            command.Parameters.Add("@id", SqlDbType.Int).Value = request.PractitionerId;
-            command.Parameters.Add("@email", SqlDbType.NVarChar, 254).Value = request.CustomerEmail;
-            hasHistory = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1;
-        }
-
         // Notification Cost: Bound anonymous request alerts per practitioner; GUID replays return before this check.
         var requestLimit = int.TryParse(configuration["BookingRequestsPerPractitionerPerHour"], out var configuredLimit)
             && configuredLimit > 0 ? configuredLimit : 20;
@@ -111,7 +98,8 @@ public sealed partial class ScheduleData
             var price = command.Parameters.Add("@price", SqlDbType.Decimal);
             price.Precision = 10;
             price.Scale = 2;
-            price.Value = Booking.Price(service, request.IsFirstVisit, hasHistory);
+            // Practitioner Pricing: Apply first-visit pricing only during approval.
+            price.Value = service.Price;
             command.Parameters.Add("@currency", SqlDbType.Char, 3).Value = service.CurrencyCode;
             command.Parameters.Add("@location", SqlDbType.NVarChar, 500).Value = practitioner.Location;
             command.Parameters.Add("@zone", SqlDbType.NVarChar, 100).Value = practitioner.TimeZoneId;

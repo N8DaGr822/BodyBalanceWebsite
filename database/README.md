@@ -1,3 +1,11 @@
+## Chakra Balance and pending request adjustments (version 16)
+
+Apply `016_chakra_balance.sql` after version 15 to add Mary's 30-Minute Chakra Balance at $55, with no separate first-visit price. The migration uses the existing service-assignment pattern and is safe to rerun after success.
+
+Admin pending requests now have an Adjust button for changing date/time. Adjustments retain pending status and do not send a customer confirmation until approval. Existing working-hours, overlap, time-zone, revision, and retry checks apply. Approval accepts practitioner-adjusted minute-level times within working hours, including short-notice changes, and rejects a decision from an outdated schedule revision. New public requests use the service price; practitioners enter any eligible first-visit price and verify it on the approval form. Existing pending prices are preserved for practitioner review.
+
+Validate this migration and the pending adjustment/approval transaction paths against a non-production database before deployment.
+
 ## Appointment date/time adjustments (version 14)
 
 Apply `014_booking_rescheduling.sql` after version 13, then run `configure_api_rescheduling_access.sql` as the database administrator before deploying the API. In **Admin > View appointment > Adjust date and time**, authenticated practitioners can move their own future confirmed appointments. The service, duration, practitioner, price, location, and customer information stay unchanged. The entered time uses the appointment's displayed time zone, not the browser's zone. Ambiguous/nonexistent daylight-saving times are rejected.
